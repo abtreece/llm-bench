@@ -1,0 +1,16 @@
+# Ollama tags benchmarked by harness/run.py.
+# Order: smallest first so harness bugs surface quickly on cheap models.
+# Endpoint: http://localhost:11434
+models:
+  - name: qwen3:4b
+    size_gb: 2.5
+  - name: qwen2.5:14b
+    size_gb: 9.0
+  - name: gemma4:latest
+    size_gb: 9.6
+  - name: qwen3-coder:30b
+    size_gb: 18.0
+  - name: laguna-xs.2:latest
+    size_gb: 23.0
+  - name: qwen3.6:latest
+    size_gb: 23.0

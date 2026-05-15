@@ -1,0 +1,13 @@
+[project]
+name = "llm-bench"
+version = "0.1.0"
+description = "Local LLM coding benchmark for Ollama models on javelin"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0",
+    "requests>=2.31",
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
