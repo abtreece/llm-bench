@@ -1,16 +1,22 @@
 # Ollama tags benchmarked by harness/run.py.
 # Order: smallest first so harness bugs surface quickly on cheap models.
 # Endpoint: http://localhost:11434
+#
+# Selection rationale: javelin has no GPU; Ollama runs CPU-only on a Dell
+# R430. Thinking models (qwen3:4b "Thinking 2507", qwen3.6) emit thousands
+# of <think> tokens before answering and consistently exceed any reasonable
+# timeout on this hardware. 30B+ models are workable but slow enough to
+# make a 3-attempt × 12-case run impractical. This list is the curated set
+# of qwen2.5 instruct sizes that complete a 250-line Python file in under
+# 10 minutes on this CPU.
 models:
-  - name: qwen3:4b
-    size_gb: 2.5
+  - name: qwen2.5:1.5b
+    size_gb: 1.0
+  - name: qwen2.5:3b
+    size_gb: 1.9
+  - name: qwen2.5:7b
+    size_gb: 4.7
+  - name: qwen2.5-coder:7b
+    size_gb: 4.7
   - name: qwen2.5:14b
     size_gb: 9.0
-  - name: gemma4:latest
-    size_gb: 9.6
-  - name: qwen3-coder:30b
-    size_gb: 18.0
-  - name: laguna-xs.2:latest
-    size_gb: 23.0
-  - name: qwen3.6:latest
-    size_gb: 23.0

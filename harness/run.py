@@ -209,6 +209,7 @@ def run_one(
     csv_file,
     artifacts_dir: Path,
     keep_worktrees: bool,
+    timeout_s: int,
 ) -> dict:
     work = WORKTREE_ROOT / run_id / f"{case.id}-{slugify(model)}-{attempt}"
     row = {f: "" for f in CSV_FIELDS}
@@ -244,11 +245,7 @@ def run_one(
         test_source = (work / test_path).read_text()
 
         if case.reference_patch:
-            clean_target = target_source
-            git_apply(case.reference_patch, work)
-            ref_source = target_path.read_text()
-            git_apply(_reverse_patch(case.reference_patch), work)
-            row["reference_diff_lines"] = diff_line_count(clean_target, ref_source)
+            row["reference_diff_lines"] = patch_diff_line_count(case.reference_patch)
 
         user_msg = USER_PROMPT_TEMPLATE.format(
             case_prompt=case.prompt,
@@ -260,7 +257,7 @@ def run_one(
 
         t0 = time.monotonic()
         try:
-            result = ollama_client.chat(model, SYSTEM_PROMPT, user_msg)
+            result = ollama_client.chat(model, SYSTEM_PROMPT, user_msg, timeout_s=timeout_s)
         except Exception as e:
             row["error"] = f"infra_error:{type(e).__name__}:{e}"
             row["latency_ms"] = int((time.monotonic() - t0) * 1000)
@@ -306,22 +303,15 @@ def run_one(
     return row
 
 
-def _reverse_patch(patch: str) -> str:
-    """Flip a unified diff so applying it reverts the original. Naive but
-    sufficient for the patches we author (no rename/binary)."""
-    out = []
-    for line in patch.splitlines(keepends=True):
-        if line.startswith("--- "):
-            out.append("+++ " + line[4:])
-        elif line.startswith("+++ "):
-            out.append("--- " + line[4:])
-        elif line.startswith("+") and not line.startswith("+++"):
-            out.append("-" + line[1:])
-        elif line.startswith("-") and not line.startswith("---"):
-            out.append("+" + line[1:])
-        else:
-            out.append(line)
-    return "".join(out)
+def patch_diff_line_count(patch: str) -> int:
+    """Count +/- body lines in a unified diff, excluding file headers."""
+    n = 0
+    for line in patch.splitlines():
+        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+            continue
+        if line.startswith("+") or line.startswith("-"):
+            n += 1
+    return n
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -331,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--attempts", type=int, default=3)
     p.add_argument("--run-id", default=None)
     p.add_argument("--keep-worktrees", action="store_true")
+    p.add_argument("--timeout", type=int, default=300, help="per-request timeout (seconds)")
     args = p.parse_args(argv)
 
     if not PYTEST_BIN.exists():
@@ -359,6 +350,7 @@ def main(argv: list[str] | None = None) -> int:
                     row = run_one(
                         run_id, model, case, attempt, w, fh,
                         artifacts_dir, args.keep_worktrees,
+                        timeout_s=args.timeout,
                     )
                     status = (
                         "PASS" if row["target_passed"] and row["regressions"] == 0
