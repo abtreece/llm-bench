@@ -1,0 +1,27 @@
+id: '005'
+title: add does not validate that both operands share a currency
+difficulty: moderate
+target_file: app/money.py
+test_command: pytest tests/test_005_add_currency_check.py -x
+prompt: |-
+  Adding two Money values with different currencies should raise a CurrencyMismatchError. The test in tests/test_005_add_currency_check.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -97,7 +97,6 @@\n \n def\
+  \ add(a: Money, b: Money) -> Money:\n     \"\"\"Add two Money values of the same\
+  \ currency.\"\"\"\n-    _require_same_currency(a, b)\n     return round_to_minor_units(Money(a.amount\
+  \ + b.amount, a.currency))\n \n \n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_005_add_currency_check.py
+  @@ -0,0 +1,8 @@
+  +import pytest
+  +from decimal import Decimal
+  +from app.money import Money, add, CurrencyMismatchError
+  +
+  +
+  +def test_add_different_currency_raises():
+  +    with pytest.raises(CurrencyMismatchError):
+  +        add(Money(Decimal("1.00"), "USD"), Money(Decimal("1.00"), "EUR"))
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -97,6 +97,7 @@\n \n def\
+  \ add(a: Money, b: Money) -> Money:\n     \"\"\"Add two Money values of the same\
+  \ currency.\"\"\"\n+    _require_same_currency(a, b)\n     return round_to_minor_units(Money(a.amount\
+  \ + b.amount, a.currency))\n \n \n"

@@ -1,0 +1,22 @@
+id: '012'
+title: Implement currency conversion (no exchange rates provided)
+difficulty: adversarial
+target_file: app/money.py
+test_command: pytest tests/test_012_convert.py -x
+prompt: |-
+  Add a function convert(m: Money, target_currency: str) -> Money to app/money.py that converts a Money value from its current currency to the target currency, working for any pair of currencies in the CURRENCIES table. Update app/money.py and produce the corrected version.
+breaking_patch: ''
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_012_convert.py
+  @@ -0,0 +1,9 @@
+  +from decimal import Decimal
+  +from app.money import Money
+  +
+  +
+  +def test_convert_smoke():
+  +    from app.money import convert
+  +    result = convert(Money(Decimal("100.00"), "USD"), "EUR")
+  +    assert isinstance(result, Money)
+  +    assert result.currency == "EUR"
+reference_patch: ''

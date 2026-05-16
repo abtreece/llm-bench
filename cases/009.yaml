@@ -1,0 +1,27 @@
+id: 009
+title: compare does not raise on currency mismatch
+difficulty: moderate
+target_file: app/money.py
+test_command: pytest tests/test_009_compare_mismatch.py -x
+prompt: |-
+  Comparing two Money values with different currencies should raise a CurrencyMismatchError. The test in tests/test_009_compare_mismatch.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -131,7 +131,6 @@\n \n\
+  \ def compare(a: Money, b: Money) -> int:\n     \"\"\"Three-way compare. Returns\
+  \ -1, 0, or 1. Currency mismatch raises.\"\"\"\n-    _require_same_currency(a, b)\n\
+  \     if a.amount < b.amount:\n         return -1\n     if a.amount > b.amount:\n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_009_compare_mismatch.py
+  @@ -0,0 +1,8 @@
+  +import pytest
+  +from decimal import Decimal
+  +from app.money import Money, compare, CurrencyMismatchError
+  +
+  +
+  +def test_compare_mismatched_currency_raises():
+  +    with pytest.raises(CurrencyMismatchError):
+  +        compare(Money(Decimal("1.00"), "USD"), Money(Decimal("1.00"), "EUR"))
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -131,6 +131,7 @@\n \n\
+  \ def compare(a: Money, b: Money) -> int:\n     \"\"\"Three-way compare. Returns\
+  \ -1, 0, or 1. Currency mismatch raises.\"\"\"\n+    _require_same_currency(a, b)\n\
+  \     if a.amount < b.amount:\n         return -1\n     if a.amount > b.amount:\n"

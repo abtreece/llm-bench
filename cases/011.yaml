@@ -1,0 +1,34 @@
+id: '011'
+title: percentage uses integer division and drops the fractional part
+difficulty: subtle
+target_file: app/money.py
+test_command: pytest tests/test_011_percentage_fractional.py -x
+prompt: |-
+  The percentage(m, pct) function in app/money.py works correctly for whole-number percentages but produces wrong results for fractional percentages. The test in tests/test_011_percentage_fractional.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -116,7 +116,7 @@\n def\
+  \ percentage(m: Money, pct) -> Money:\n     \"\"\"Return pct% of m. pct=10 means\
+  \ 10%.\"\"\"\n     p = pct if isinstance(pct, Decimal) else Decimal(str(pct))\n\
+  -    return round_to_minor_units(Money(m.amount * p / Decimal(100), m.currency))\n\
+  +    return round_to_minor_units(Money(m.amount * p // Decimal(100), m.currency))\n\
+  \ \n \n def negate(m: Money) -> Money:\n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_011_percentage_fractional.py
+  @@ -0,0 +1,11 @@
+  +from decimal import Decimal
+  +from app.money import Money, percentage
+  +
+  +
+  +def test_percentage_fractional_amount():
+  +    assert percentage(Money(Decimal("100.00"), "USD"), Decimal("8.25")) == Money(Decimal("8.25"), "USD")
+  +
+  +
+  +def test_percentage_decimal_rate():
+  +    # 33.33% of $100.00 = $33.33
+  +    assert percentage(Money(Decimal("100.00"), "USD"), Decimal("33.33")) == Money(Decimal("33.33"), "USD")
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -116,7 +116,7 @@\n def\
+  \ percentage(m: Money, pct) -> Money:\n     \"\"\"Return pct% of m. pct=10 means\
+  \ 10%.\"\"\"\n     p = pct if isinstance(pct, Decimal) else Decimal(str(pct))\n\
+  -    return round_to_minor_units(Money(m.amount * p // Decimal(100), m.currency))\n\
+  +    return round_to_minor_units(Money(m.amount * p / Decimal(100), m.currency))\n\
+  \ \n \n def negate(m: Money) -> Money:\n"

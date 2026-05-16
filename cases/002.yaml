@@ -1,0 +1,29 @@
+id: '002'
+title: subtract returns b - a instead of a - b
+difficulty: obvious
+target_file: app/money.py
+test_command: pytest tests/test_002_subtract_order.py -x
+prompt: |-
+  The subtract(a, b) function in app/money.py is returning the wrong result. The test in tests/test_002_subtract_order.py is failing. Read the failing test and the function, then produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -104,7 +104,7 @@\n def\
+  \ subtract(a: Money, b: Money) -> Money:\n     \"\"\"Return a - b (same currency\
+  \ required).\"\"\"\n     _require_same_currency(a, b)\n-    return round_to_minor_units(Money(a.amount\
+  \ - b.amount, a.currency))\n+    return round_to_minor_units(Money(b.amount - a.amount,\
+  \ a.currency))\n \n \n def multiply(m: Money, factor) -> Money:\n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_002_subtract_order.py
+  @@ -0,0 +1,8 @@
+  +from decimal import Decimal
+  +from app.money import Money, subtract
+  +
+  +
+  +def test_subtract_returns_a_minus_b():
+  +    a = Money(Decimal("5.00"), "USD")
+  +    b = Money(Decimal("3.00"), "USD")
+  +    assert subtract(a, b) == Money(Decimal("2.00"), "USD")
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -104,7 +104,7 @@\n def\
+  \ subtract(a: Money, b: Money) -> Money:\n     \"\"\"Return a - b (same currency\
+  \ required).\"\"\"\n     _require_same_currency(a, b)\n-    return round_to_minor_units(Money(b.amount\
+  \ - a.amount, a.currency))\n+    return round_to_minor_units(Money(a.amount - b.amount,\
+  \ a.currency))\n \n \n def multiply(m: Money, factor) -> Money:\n"

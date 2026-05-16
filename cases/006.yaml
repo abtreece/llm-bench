@@ -1,0 +1,31 @@
+id: '006'
+title: parse_money rejects strings containing comma thousands separators
+difficulty: moderate
+target_file: app/money.py
+test_command: pytest tests/test_006_parse_thousands_separator.py -x
+prompt: |-
+  The parse_money function in app/money.py should accept numeric strings that use comma as a thousands separator. The test in tests/test_006_parse_thousands_separator.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -161,7 +161,7 @@\n   \
+  \  return [minor_to_major(sign * s, m.currency) for s in shares]\n \n \n-_AMOUNT_RE\
+  \ = re.compile(r\"^\\s*(-?)\\s*([\\d,]+)(?:\\.(\\d+))?\\s*$\")\n+_AMOUNT_RE = re.compile(r\"\
+  ^\\s*(-?)\\s*(\\d+)(?:\\.(\\d+))?\\s*$\")\n \n \n def parse_money(s: str, currency:\
+  \ str) -> Money:\n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_006_parse_thousands_separator.py
+  @@ -0,0 +1,10 @@
+  +from decimal import Decimal
+  +from app.money import Money, parse_money
+  +
+  +
+  +def test_parse_with_comma_thousands_separator():
+  +    assert parse_money("1,234.56", "USD") == Money(Decimal("1234.56"), "USD")
+  +
+  +
+  +def test_parse_large_amount_with_commas():
+  +    assert parse_money("1,000,000.00", "USD") == Money(Decimal("1000000.00"), "USD")
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -161,7 +161,7 @@\n  \
+  \   return [minor_to_major(sign * s, m.currency) for s in shares]\n \n \n-_AMOUNT_RE\
+  \ = re.compile(r\"^\\s*(-?)\\s*(\\d+)(?:\\.(\\d+))?\\s*$\")\n+_AMOUNT_RE = re.compile(r\"\
+  ^\\s*(-?)\\s*([\\d,]+)(?:\\.(\\d+))?\\s*$\")\n \n \n def parse_money(s: str, currency:\
+  \ str) -> Money:\n"

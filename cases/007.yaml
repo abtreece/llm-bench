@@ -1,0 +1,29 @@
+id: '007'
+title: parse_money_str accepts only the prefix form (USD 1.23)
+difficulty: moderate
+target_file: app/money.py
+test_command: pytest tests/test_007_parse_money_str_suffix.py -x
+prompt: |-
+  The parse_money_str function in app/money.py should accept both the prefix form ("USD 1.23") and the suffix form ("1.23 USD"). The test in tests/test_007_parse_money_str_suffix.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -185,7 +185,7 @@\n   \
+  \  return round_to_minor_units(Money(raw, currency))\n \n \n-_TAG_RE = re.compile(r\"\
+  ^\\s*([A-Z]{3})\\s+(.+?)\\s*$|^\\s*(.+?)\\s+([A-Z]{3})\\s*$\")\n+_TAG_RE = re.compile(r\"\
+  ^\\s*([A-Z]{3})\\s+(.+?)\\s*$\")\n \n \n def parse_money_str(s: str) -> Money:\n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_007_parse_money_str_suffix.py
+  @@ -0,0 +1,10 @@
+  +from decimal import Decimal
+  +from app.money import Money, parse_money_str
+  +
+  +
+  +def test_parse_suffix_form():
+  +    assert parse_money_str("1234.56 USD") == Money(Decimal("1234.56"), "USD")
+  +
+  +
+  +def test_parse_suffix_with_thousands():
+  +    assert parse_money_str("1,234.56 EUR") == Money(Decimal("1234.56"), "EUR")
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -185,7 +185,7 @@\n  \
+  \   return round_to_minor_units(Money(raw, currency))\n \n \n-_TAG_RE = re.compile(r\"\
+  ^\\s*([A-Z]{3})\\s+(.+?)\\s*$\")\n+_TAG_RE = re.compile(r\"^\\s*([A-Z]{3})\\s+(.+?)\\\
+  s*$|^\\s*(.+?)\\s+([A-Z]{3})\\s*$\")\n \n \n def parse_money_str(s: str) -> Money:\n"

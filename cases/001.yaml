@@ -1,0 +1,35 @@
+id: '001'
+title: minor_to_major mishandles currencies with non-2-decimal minor units
+difficulty: obvious
+target_file: app/money.py
+test_command: pytest tests/test_001_minor_to_major_currency.py -x
+prompt: |-
+  The minor_to_major(minor, currency) function in app/money.py is not returning the right value for some currencies. The test in tests/test_001_minor_to_major_currency.py is failing. Read the failing test and the CURRENCIES table in app/money.py, then produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -71,8 +71,7 @@\n     \"\
+  \"\"\n     if not isinstance(minor, int):\n         raise TypeError(\"minor must\
+  \ be int\")\n-    digits = minor_units(currency)\n-    amount = (Decimal(minor)\
+  \ * Decimal(\"1\").scaleb(-digits)).quantize(_quantum(currency))\n+    amount =\
+  \ (Decimal(minor) / Decimal(100)).quantize(Decimal(\"0.01\"))\n     return Money(amount,\
+  \ currency)\n \n \n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_001_minor_to_major_currency.py
+  @@ -0,0 +1,12 @@
+  +from decimal import Decimal
+  +from app.money import Money, minor_to_major
+  +
+  +
+  +def test_jpy_minor_unit_count():
+  +    # JPY has zero minor units: 12345 yen minor units = 12345 yen.
+  +    assert minor_to_major(12345, "JPY") == Money(Decimal("12345"), "JPY")
+  +
+  +
+  +def test_kwd_three_minor_units():
+  +    # KWD has three minor units: 12345 fils = 12.345 KWD.
+  +    assert minor_to_major(12345, "KWD") == Money(Decimal("12.345"), "KWD")
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -71,7 +71,8 @@\n    \
+  \ \"\"\"\n     if not isinstance(minor, int):\n         raise TypeError(\"minor\
+  \ must be int\")\n-    amount = (Decimal(minor) / Decimal(100)).quantize(Decimal(\"\
+  0.01\"))\n+    digits = minor_units(currency)\n+    amount = (Decimal(minor) * Decimal(\"\
+  1\").scaleb(-digits)).quantize(_quantum(currency))\n     return Money(amount, currency)\n\
+  \ \n \n"

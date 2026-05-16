@@ -1,0 +1,29 @@
+id: '004'
+title: negate hardcodes the currency to USD
+difficulty: obvious
+target_file: app/money.py
+test_command: pytest tests/test_004_negate_currency.py -x
+prompt: |-
+  The negate function in app/money.py is changing the currency of the returned Money value. The test in tests/test_004_negate_currency.py is failing. Read the failing test and the function, then produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -121,7 +121,7 @@\n \n\
+  \ def negate(m: Money) -> Money:\n     \"\"\"Return -m, preserving the currency.\"\
+  \"\"\n-    return Money(-m.amount, m.currency)\n+    return Money(-m.amount, \"\
+  USD\")\n \n \n def is_zero(m: Money) -> bool:\n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_004_negate_currency.py
+  @@ -0,0 +1,10 @@
+  +from decimal import Decimal
+  +from app.money import Money, negate
+  +
+  +
+  +def test_negate_preserves_eur():
+  +    assert negate(Money(Decimal("1.00"), "EUR")).currency == "EUR"
+  +
+  +
+  +def test_negate_preserves_jpy():
+  +    assert negate(Money(Decimal("100"), "JPY")).currency == "JPY"
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -121,7 +121,7 @@\n \n\
+  \ def negate(m: Money) -> Money:\n     \"\"\"Return -m, preserving the currency.\"\
+  \"\"\n-    return Money(-m.amount, \"USD\")\n+    return Money(-m.amount, m.currency)\n\
+  \ \n \n def is_zero(m: Money) -> bool:\n"

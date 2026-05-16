@@ -1,0 +1,41 @@
+id: 008
+title: allocate distributes the remainder right-to-left instead of left-to-right
+difficulty: moderate
+target_file: app/money.py
+test_command: pytest tests/test_008_allocate_remainder_order.py -x
+prompt: |-
+  When allocate(m, ratios) splits a Money value and there is a remainder, the remainder should be distributed one minor unit at a time to the earlier buckets (left-to-right). The test in tests/test_008_allocate_remainder_order.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -157,7 +157,7 @@\n   \
+  \  shares = [total_abs * r // total_ratio for r in ratios]\n     remainder = total_abs\
+  \ - sum(shares)\n     for i in range(remainder):\n-        shares[i % len(shares)]\
+  \ += 1\n+        shares[-1 - (i % len(shares))] += 1\n     return [minor_to_major(sign\
+  \ * s, m.currency) for s in shares]\n \n \n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_008_allocate_remainder_order.py
+  @@ -0,0 +1,20 @@
+  +from decimal import Decimal
+  +from app.money import Money, allocate
+  +
+  +
+  +def test_allocate_remainder_to_earlier_buckets():
+  +    parts = allocate(Money(Decimal("0.05"), "USD"), [1, 1, 1])
+  +    assert [p.amount for p in parts] == [
+  +        Decimal("0.02"),
+  +        Decimal("0.02"),
+  +        Decimal("0.01"),
+  +    ]
+  +
+  +
+  +def test_allocate_remainder_unequal_ratios():
+  +    parts = allocate(Money(Decimal("1.00"), "USD"), [1, 2, 3])
+  +    assert [p.amount for p in parts] == [
+  +        Decimal("0.17"),
+  +        Decimal("0.33"),
+  +        Decimal("0.50"),
+  +    ]
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -157,7 +157,7 @@\n  \
+  \   shares = [total_abs * r // total_ratio for r in ratios]\n     remainder = total_abs\
+  \ - sum(shares)\n     for i in range(remainder):\n-        shares[-1 - (i % len(shares))]\
+  \ += 1\n+        shares[i % len(shares)] += 1\n     return [minor_to_major(sign\
+  \ * s, m.currency) for s in shares]\n \n \n"

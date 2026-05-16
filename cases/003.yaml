@@ -1,0 +1,32 @@
+id: '003'
+title: format_amount always uses 2 decimal places
+difficulty: obvious
+target_file: app/money.py
+test_command: pytest tests/test_003_format_amount_decimals.py -x
+prompt: |-
+  The format_amount function in app/money.py is producing the wrong number of decimal places for some currencies. The test in tests/test_003_format_amount_decimals.py is failing. Read the failing test and the CURRENCIES table, then produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -210,10 +210,7 @@\n  \
+  \   format_amount(Money(5, \"KWD\")) -> \"5.000\"\n     \"\"\"\n     rounded = round_to_minor_units(m)\n\
+  -    digits = minor_units(m.currency)\n-    if digits == 0:\n-        return f\"\
+  {int(rounded.amount)}\"\n-    return f\"{rounded.amount:.{digits}f}\"\n+    return\
+  \ f\"{rounded.amount:.2f}\"\n \n \n def format_money(m: Money) -> str:\n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_003_format_amount_decimals.py
+  @@ -0,0 +1,10 @@
+  +from decimal import Decimal
+  +from app.money import Money, format_amount
+  +
+  +
+  +def test_format_amount_jpy_has_no_decimal():
+  +    assert format_amount(Money(Decimal("1234"), "JPY")) == "1234"
+  +
+  +
+  +def test_format_amount_kwd_has_three_decimals():
+  +    assert format_amount(Money(Decimal("1.234"), "KWD")) == "1.234"
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -210,7 +210,10 @@\n \
+  \    format_amount(Money(5, \"KWD\")) -> \"5.000\"\n     \"\"\"\n     rounded =\
+  \ round_to_minor_units(m)\n-    return f\"{rounded.amount:.2f}\"\n+    digits =\
+  \ minor_units(m.currency)\n+    if digits == 0:\n+        return f\"{int(rounded.amount)}\"\
+  \n+    return f\"{rounded.amount:.{digits}f}\"\n \n \n def format_money(m: Money)\
+  \ -> str:\n"

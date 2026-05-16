@@ -1,0 +1,35 @@
+id: '010'
+title: round_to_minor_units default rounding mode is wrong
+difficulty: subtle
+target_file: app/money.py
+test_command: pytest tests/test_010_default_rounding_mode.py -x
+prompt: |-
+  The test in tests/test_010_default_rounding_mode.py is failing. Read the failing test, identify which function in app/money.py is rounding incorrectly on .5 boundaries, and produce a corrected app/money.py. Do not modify the test.
+breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -85,7 +85,7 @@\n     return\
+  \ int(scaled)\n \n \n-def round_to_minor_units(m: Money, rounding: str = ROUND_HALF_EVEN)\
+  \ -> Money:\n+def round_to_minor_units(m: Money, rounding: str = \"ROUND_HALF_UP\"\
+  ) -> Money:\n     \"\"\"Quantize the amount to the currency's minor units using\
+  \ banker's rounding by default.\"\"\"\n     return Money(m.amount.quantize(_quantum(m.currency),\
+  \ rounding=rounding), m.currency)\n \n"
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_010_default_rounding_mode.py
+  @@ -0,0 +1,12 @@
+  +from decimal import Decimal
+  +from app.money import Money, round_to_minor_units
+  +
+  +
+  +def test_round_half_with_even_neighbor_rounds_down():
+  +    # 0.025 -> 0.02 (preceding digit 2 is even, .5 rounds toward even)
+  +    assert round_to_minor_units(Money(Decimal("0.025"), "USD")).amount == Decimal("0.02")
+  +
+  +
+  +def test_round_half_with_zero_neighbor_rounds_down():
+  +    # 0.005 -> 0.00 (preceding digit 0 is even)
+  +    assert round_to_minor_units(Money(Decimal("0.005"), "USD")).amount == Decimal("0.00")
+reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -85,7 +85,7 @@\n    \
+  \ return int(scaled)\n \n \n-def round_to_minor_units(m: Money, rounding: str =\
+  \ \"ROUND_HALF_UP\") -> Money:\n+def round_to_minor_units(m: Money, rounding: str\
+  \ = ROUND_HALF_EVEN) -> Money:\n     \"\"\"Quantize the amount to the currency's\
+  \ minor units using banker's rounding by default.\"\"\"\n     return Money(m.amount.quantize(_quantum(m.currency),\
+  \ rounding=rounding), m.currency)\n \n"
