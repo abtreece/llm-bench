@@ -79,10 +79,13 @@ CSV_FIELDS = [
     "target_passed",
     "regressions",
     "latency_ms",
+    "eval_ms",
+    "load_ms",
     "prompt_tokens",
     "completion_tokens",
     "reference_diff_lines",
     "model_diff_lines",
+    "blocked_paths",
     "error",
 ]
 
@@ -200,16 +203,30 @@ def status_line(model: str, case_id: str, attempt: int, status: str, ms: int) ->
     return f"[{model:>22}] case {case_id} attempt {attempt} → {status} ({ms} ms)"
 
 
+def compute_baseline(case: Case, run_id: str) -> set[str]:
+    """Full-suite failures in the broken+test state. Model/attempt independent,
+    so computed once per case instead of once per row."""
+    work = WORKTREE_ROOT / run_id / f"baseline-{case.id}"
+    try:
+        setup_worktree(work)
+        if case.breaking_patch:
+            git_apply(case.breaking_patch, work)
+        git_apply(case.test_patch, work)
+        return scorer.collect_baseline_failures(work, PYTEST_BIN)
+    finally:
+        remove_worktree(work)
+
+
 def run_one(
     run_id: str,
     model: str,
     case: Case,
     attempt: int,
-    csv_writer: csv.DictWriter,
-    csv_file,
+    baseline_failures: set[str],
     artifacts_dir: Path,
     keep_worktrees: bool,
     timeout_s: int,
+    test_timeout_s: int,
 ) -> dict:
     work = WORKTREE_ROOT / run_id / f"{case.id}-{slugify(model)}-{attempt}"
     row = {f: "" for f in CSV_FIELDS}
@@ -222,22 +239,24 @@ def run_one(
         target_passed=False,
         regressions=0,
         latency_ms=0,
+        eval_ms=0,
+        load_ms=0,
         prompt_tokens=0,
         completion_tokens=0,
         reference_diff_lines=0,
         model_diff_lines=0,
+        blocked_paths="",
         error="",
     )
     try:
         setup_worktree(work)
-        git_apply(case.breaking_patch, work)
+        if case.breaking_patch:
+            git_apply(case.breaking_patch, work)
         git_apply(case.test_patch, work)
 
-        baseline_failures = scorer.collect_baseline_failures(work, PYTEST_BIN)
         test_path = parse_test_path_from_patch(case.test_patch)
         if not baseline_failures:
             row["error"] = "baseline_clean"
-            csv_writer.writerow(row); csv_file.flush()
             return row
 
         target_path = work / case.target_file
@@ -255,20 +274,28 @@ def run_one(
             target_source=target_source,
         )
 
+        # Attempt 1 is greedy (temperature 0); later attempts get a seeded
+        # nonzero temperature, otherwise they'd reproduce attempt 1 verbatim.
+        temperature = 0.0 if attempt == 1 else 0.4
+        seed = None if attempt == 1 else attempt
+
         t0 = time.monotonic()
         try:
-            result = ollama_client.chat(model, SYSTEM_PROMPT, user_msg, timeout_s=timeout_s)
+            result = ollama_client.chat(
+                model, SYSTEM_PROMPT, user_msg,
+                timeout_s=timeout_s, temperature=temperature, seed=seed,
+            )
         except Exception as e:
             row["error"] = f"infra_error:{type(e).__name__}:{e}"
             row["latency_ms"] = int((time.monotonic() - t0) * 1000)
-            csv_writer.writerow(row); csv_file.flush()
             return row
-        latency_ms = int((time.monotonic() - t0) * 1000)
-        row["latency_ms"] = latency_ms
+        row["latency_ms"] = int((time.monotonic() - t0) * 1000)
+        row["eval_ms"] = result.eval_duration_ns // 1_000_000
+        row["load_ms"] = result.load_duration_ns // 1_000_000
         row["prompt_tokens"] = result.prompt_eval_count
         row["completion_tokens"] = result.eval_count
 
-        attempt_artifacts = artifacts_dir / model.replace(":", "-").replace("/", "_") / case.id / str(attempt)
+        attempt_artifacts = artifacts_dir / slugify(model) / case.id / str(attempt)
         attempt_artifacts.mkdir(parents=True, exist_ok=True)
         (attempt_artifacts / "response.txt").write_text(result.content)
 
@@ -276,11 +303,11 @@ def run_one(
             blocks = scorer.extract_blocks(result.content)
         except ValueError as e:
             row["error"] = f"parse_error:{e}"
-            csv_writer.writerow(row); csv_file.flush()
             return row
 
         row["schema_ok"] = True
-        scorer.apply_blocks(work, blocks)
+        _, blocked = scorer.apply_blocks(work, blocks)
+        row["blocked_paths"] = ";".join(blocked)
 
         new_target = (work / case.target_file).read_text() if (work / case.target_file).exists() else ""
         row["model_diff_lines"] = diff_line_count(target_source, new_target)
@@ -288,7 +315,12 @@ def run_one(
         for relpath in blocks:
             (attempt_artifacts / f"file_{relpath.replace('/', '_')}").write_text(blocks[relpath])
 
-        tr = scorer.run_tests(work, test_path, baseline_failures, pytest_bin=PYTEST_BIN)
+        tr = scorer.run_tests(
+            work, test_path, baseline_failures,
+            pytest_bin=PYTEST_BIN,
+            target_timeout_s=test_timeout_s,
+            regression_timeout_s=test_timeout_s * 2,
+        )
         (attempt_artifacts / "pytest.txt").write_text(tr.stdout)
         row["target_passed"] = tr.target_passed
         row["regressions"] = tr.regressions
@@ -299,7 +331,6 @@ def run_one(
         if not keep_worktrees:
             remove_worktree(work)
 
-    csv_writer.writerow(row); csv_file.flush()
     return row
 
 
@@ -322,6 +353,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-id", default=None)
     p.add_argument("--keep-worktrees", action="store_true")
     p.add_argument("--timeout", type=int, default=300, help="per-request timeout (seconds)")
+    p.add_argument("--test-timeout", type=int, default=60,
+                   help="pytest timeout for the target test (full suite gets 2x)")
     args = p.parse_args(argv)
 
     if not PYTEST_BIN.exists():
@@ -341,17 +374,27 @@ def main(argv: list[str] | None = None) -> int:
     print(f"# csv={csv_path}")
     print(f"# artifacts={artifacts_dir}")
 
+    print("# computing per-case baselines...")
+    baselines = {case.id: compute_baseline(case, run_id) for case in cases}
+
     with csv_path.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
         w.writeheader()
         for model in models:
+            try:
+                ollama_client.warm_up(model, timeout_s=args.timeout)
+            except Exception as e:
+                print(f"[{model:>22}] warm-up failed: {e} — skipping model")
+                continue
             for case in cases:
                 for attempt in range(1, args.attempts + 1):
                     row = run_one(
-                        run_id, model, case, attempt, w, fh,
+                        run_id, model, case, attempt, baselines[case.id],
                         artifacts_dir, args.keep_worktrees,
                         timeout_s=args.timeout,
+                        test_timeout_s=args.test_timeout,
                     )
+                    w.writerow(row); fh.flush()
                     status = (
                         "PASS" if row["target_passed"] and row["regressions"] == 0
                         else ("REGRESS" if row["target_passed"] else

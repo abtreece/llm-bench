@@ -18,6 +18,8 @@ class ChatResult:
     prompt_eval_count: int
     eval_count: int
     total_duration_ns: int
+    load_duration_ns: int
+    eval_duration_ns: int
 
 
 def chat(
@@ -28,7 +30,15 @@ def chat(
     base_url: str = DEFAULT_BASE_URL,
     timeout_s: int = DEFAULT_TIMEOUT_S,
     num_ctx: int = DEFAULT_NUM_CTX,
+    temperature: float = 0.0,
+    seed: int | None = None,
 ) -> ChatResult:
+    options = {
+        "temperature": temperature,
+        "num_ctx": num_ctx,
+    }
+    if seed is not None:
+        options["seed"] = seed
     payload = {
         "model": model,
         "messages": [
@@ -36,15 +46,13 @@ def chat(
             {"role": "user", "content": user},
         ],
         "stream": False,
-        "options": {
-            "temperature": 0,
-            "num_ctx": num_ctx,
-        },
+        "options": options,
     }
+    # (connect, read) — read covers the full non-streamed generation.
     r = requests.post(
         f"{base_url}/api/chat",
         json=payload,
-        timeout=timeout_s,
+        timeout=(10, timeout_s),
     )
     r.raise_for_status()
     data = r.json()
@@ -54,7 +62,20 @@ def chat(
         prompt_eval_count=int(data.get("prompt_eval_count", 0)),
         eval_count=int(data.get("eval_count", 0)),
         total_duration_ns=int(data.get("total_duration", 0)),
+        load_duration_ns=int(data.get("load_duration", 0)),
+        eval_duration_ns=int(data.get("eval_duration", 0)),
     )
+
+
+def warm_up(
+    model: str,
+    *,
+    base_url: str = DEFAULT_BASE_URL,
+    timeout_s: int = DEFAULT_TIMEOUT_S,
+) -> None:
+    """Load the model into memory so benchmark latencies exclude cold-start."""
+    chat(model, "You are a helpful assistant.", "Reply with: ok",
+         base_url=base_url, timeout_s=timeout_s, num_ctx=512)
 
 
 def list_local_models(base_url: str = DEFAULT_BASE_URL) -> Iterable[str]:

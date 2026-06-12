@@ -52,24 +52,31 @@ def extract_blocks(text: str) -> dict[str, str]:
     return blocks
 
 
-def apply_blocks(worktree: Path, blocks: dict[str, str]) -> list[str]:
+def apply_blocks(
+    worktree: Path,
+    blocks: dict[str, str],
+    allowed_prefixes: tuple[str, ...] = ("app/",),
+) -> tuple[list[str], list[str]]:
     """Write each block's body to worktree/<path>, overwriting.
 
-    Silently skips blocks targeting tests/* — models are not allowed to edit
-    tests, and letting them would make pass-the-test trivial. Returns the
-    list of paths actually written.
+    Only paths under `allowed_prefixes` are written — this blocks edits to
+    tests/ and also conftest.py / pytest.ini style files that could
+    monkeypatch the suite into passing. Returns (written, blocked) paths.
     """
     written: list[str] = []
+    blocked: list[str] = []
     for relpath, body in blocks.items():
-        if relpath.startswith("tests/") or relpath.startswith("./tests/"):
+        norm = relpath[2:] if relpath.startswith("./") else relpath
+        if not any(norm.startswith(p) for p in allowed_prefixes):
+            blocked.append(norm)
             continue
-        dest = worktree / relpath
+        dest = worktree / norm
         dest.parent.mkdir(parents=True, exist_ok=True)
         if not body.endswith("\n"):
             body = body + "\n"
         dest.write_text(body)
-        written.append(relpath)
-    return written
+        written.append(norm)
+    return written, blocked
 
 
 def _pytest_env(worktree: Path) -> dict[str, str]:
@@ -106,7 +113,9 @@ def _run_pytest(
         return 124, f"<timeout after {timeout_s}s>\n{e.stdout or ''}\n{e.stderr or ''}"
 
 
-_FAILED_LINE_RE = re.compile(r"^FAILED\s+(\S+::\S+)", re.MULTILINE)
+# FAILED for test failures, ERROR for collection/import errors — a model edit
+# that breaks an import must count as a regression, not vanish.
+_FAILED_LINE_RE = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.MULTILINE)
 
 
 def _failed_node_ids(output: str) -> set[str]:
