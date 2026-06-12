@@ -163,3 +163,69 @@ class TestBuildHardware:
         with pytest.raises(recommend.RecommendError):
             recommend.build_hardware("Linux", "x86_64", nvidia_out=None,
                                      rocm_out=None, lspci_out="", ram_gb=None)
+
+
+T4_BUDGET = 16.1  # 15360 MiB
+
+
+class TestFitRule:
+    def test_t4_anchor_30b_excluded(self):
+        assert recommend.fits(19.0, T4_BUDGET, 2.0) is False
+
+    def test_t4_anchor_14b_admitted(self):
+        assert recommend.fits(9.0, T4_BUDGET, 2.0) is True
+
+    def test_boundary_is_inclusive(self):
+        assert recommend.fits(14.0, 16.0, 2.0) is True
+        assert recommend.fits(14.1, 16.0, 2.0) is False
+
+    def test_headroom_override(self):
+        assert recommend.fits(15.5, T4_BUDGET, 0.5) is True
+        assert recommend.fits(15.5, T4_BUDGET, 2.0) is False
+
+
+class TestTierSelection:
+    INSTALLED = [
+        {"name": "qwen2.5:14b", "size_gb": 9.0},
+        {"name": "qwen3-coder:30b", "size_gb": 19.0},
+    ]
+    CATALOG = [
+        {"name": "qwen2.5-coder:14b", "size_gb": 9.0},
+        {"name": "qwen2.5-coder:32b", "size_gb": 20.0},
+        {"name": "qwen2.5:14b", "size_gb": 9.0},  # also installed
+    ]
+
+    def test_tiers_on_t4(self):
+        tiers = recommend.select_tiers(
+            self.INSTALLED, self.CATALOG, budget_gb=T4_BUDGET, headroom_gb=2.0)
+        assert [m.name for m in tiers.selected] == ["qwen2.5:14b"]
+        assert [m.name for m in tiers.excluded] == ["qwen3-coder:30b"]
+        # 32b doesn't fit, qwen2.5:14b already installed
+        assert [m.name for m in tiers.worth_pulling] == ["qwen2.5-coder:14b"]
+
+    def test_margin_is_budget_minus_size_minus_headroom(self):
+        tiers = recommend.select_tiers(
+            self.INSTALLED, self.CATALOG, budget_gb=T4_BUDGET, headroom_gb=2.0)
+        assert abs(tiers.selected[0].margin_gb - (T4_BUDGET - 9.0 - 2.0)) < 0.01
+
+    def test_exact_tag_match_only(self):
+        installed = [{"name": "qwen2.5-coder:14b-instruct-q8_0", "size_gb": 15.0}]
+        catalog = [{"name": "qwen2.5-coder:14b", "size_gb": 9.0}]
+        tiers = recommend.select_tiers(installed, catalog,
+                                       budget_gb=20.0, headroom_gb=2.0)
+        assert [m.name for m in tiers.worth_pulling] == ["qwen2.5-coder:14b"]
+
+    def test_empty_installed_still_suggests_catalog(self):
+        tiers = recommend.select_tiers([], self.CATALOG,
+                                       budget_gb=T4_BUDGET, headroom_gb=2.0)
+        assert tiers.selected == [] and tiers.excluded == []
+        assert len(tiers.worth_pulling) == 2
+
+    def test_tiers_sorted_smallest_first(self):
+        installed = [
+            {"name": "big", "size_gb": 9.0},
+            {"name": "small", "size_gb": 1.0},
+        ]
+        tiers = recommend.select_tiers(installed, [],
+                                       budget_gb=16.0, headroom_gb=2.0)
+        assert [m.name for m in tiers.selected] == ["small", "big"]

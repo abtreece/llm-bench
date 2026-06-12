@@ -188,3 +188,53 @@ def build_hardware(
     if ram_gb is None:
         raise RecommendError("no usable GPU and could not read RAM size")
     return Hardware("cpu", [], ram_gb, ram_gb - CPU_OS_RESERVE_GB, warnings)
+
+
+DEFAULT_HEADROOM_GB = 2.0  # KV cache at num_ctx=16384 plus runtime overhead
+
+
+def fits(size_gb: float, budget_gb: float, headroom_gb: float) -> bool:
+    return size_gb + headroom_gb <= budget_gb
+
+
+@dataclass(frozen=True)
+class ModelFit:
+    name: str
+    size_gb: float
+    margin_gb: float  # budget - size - headroom; negative when excluded
+
+
+@dataclass(frozen=True)
+class Tiers:
+    selected: list[ModelFit]       # installed, fits
+    excluded: list[ModelFit]       # installed, does not fit
+    worth_pulling: list[ModelFit]  # catalog, fits, not installed
+
+
+def select_tiers(
+    installed: list[dict],
+    catalog: list[dict],
+    *,
+    budget_gb: float,
+    headroom_gb: float,
+) -> Tiers:
+    def fit(m: dict) -> ModelFit:
+        return ModelFit(m["name"], m["size_gb"],
+                        budget_gb - m["size_gb"] - headroom_gb)
+
+    def by_size(f: ModelFit) -> float:
+        return f.size_gb
+
+    installed_names = {m["name"] for m in installed}
+    selected = sorted(
+        (fit(m) for m in installed if fits(m["size_gb"], budget_gb, headroom_gb)),
+        key=by_size)
+    excluded = sorted(
+        (fit(m) for m in installed if not fits(m["size_gb"], budget_gb, headroom_gb)),
+        key=by_size)
+    worth_pulling = sorted(
+        (fit(m) for m in catalog
+         if m["name"] not in installed_names
+         and fits(m["size_gb"], budget_gb, headroom_gb)),
+        key=by_size)
+    return Tiers(selected, excluded, worth_pulling)
