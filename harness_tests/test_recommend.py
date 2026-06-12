@@ -155,6 +155,19 @@ class TestBuildHardware:
         assert hw.backend == "cpu"
         assert any("lspci" in w for w in hw.warnings)
 
+    def test_low_ram_cpu_budget_clamps_to_zero(self):
+        # 2 GB host: reserve exceeds RAM; budget must not go negative.
+        hw = recommend.build_hardware(
+            "Linux", "x86_64", nvidia_out=None, rocm_out=None,
+            lspci_out=LSPCI_NONE, ram_gb=2.0)
+        assert hw.budget_gb == 0.0
+
+    def test_low_ram_darwin_x86_budget_clamps_to_zero(self):
+        hw = recommend.build_hardware(
+            "Darwin", "x86_64", nvidia_out=None, rocm_out=None,
+            lspci_out=None, ram_gb=2.0)
+        assert hw.budget_gb == 0.0
+
     def test_unsupported_os_raises(self):
         with pytest.raises(recommend.RecommendError):
             recommend.build_hardware("Windows", "AMD64", nvidia_out=None,
@@ -298,6 +311,12 @@ class TestMain:
         rc = recommend.main([])
         assert rc != 0
         assert "unsupported OS" in capsys.readouterr().err
+
+    def test_negative_headroom_rejected(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            recommend.main(["--headroom-gb", "-1"])
+        assert exc.value.code != 0
+        assert "must be >= 0" in capsys.readouterr().err
 
     def test_ollama_down_still_reports(self, monkeypatch, capsys):
         monkeypatch.setattr(

@@ -160,7 +160,8 @@ def build_hardware(
                             APPLE_UNIFIED_FRACTION * ram_gb, warnings)
         warnings.append(
             "Intel Mac: Ollama does not accelerate Intel GPUs; using CPU budget.")
-        return Hardware("cpu", [], ram_gb, ram_gb - CPU_OS_RESERVE_GB, warnings)
+        return Hardware("cpu", [], ram_gb,
+                        max(0.0, ram_gb - CPU_OS_RESERVE_GB), warnings)
 
     if system != "Linux":
         raise RecommendError(f"unsupported OS: {system}")
@@ -194,7 +195,8 @@ def build_hardware(
 
     if ram_gb is None:
         raise RecommendError("no usable GPU and could not read RAM size")
-    return Hardware("cpu", [], ram_gb, ram_gb - CPU_OS_RESERVE_GB, warnings)
+    return Hardware("cpu", [], ram_gb,
+                    max(0.0, ram_gb - CPU_OS_RESERVE_GB), warnings)
 
 
 DEFAULT_HEADROOM_GB = 2.0  # KV cache at num_ctx=16384 plus runtime overhead
@@ -353,11 +355,18 @@ def probe_hardware() -> Hardware:
                           lspci_out=None, ram_gb=None)
 
 
+def _nonnegative_float(s: str) -> float:
+    v = float(s)
+    if v < 0:
+        raise argparse.ArgumentTypeError(f"must be >= 0, got {s}")
+    return v
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description="Recommend Ollama models for this host (advisory; "
                     "never writes models.yaml).")
-    p.add_argument("--headroom-gb", type=float, default=DEFAULT_HEADROOM_GB,
+    p.add_argument("--headroom-gb", type=_nonnegative_float, default=DEFAULT_HEADROOM_GB,
                    help="memory kept free for KV cache and runtime overhead "
                         f"(default {DEFAULT_HEADROOM_GB})")
     args = p.parse_args(argv)
