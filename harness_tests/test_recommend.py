@@ -290,3 +290,25 @@ class TestRender:
     def test_empty_snippet_is_omitted_from_report(self):
         text = recommend.render_report(make_hw(), make_tiers(), headroom_gb=2.0)
         assert "models.yaml snippet" not in text
+
+
+class TestMain:
+    def test_unsupported_os_exits_nonzero(self, monkeypatch, capsys):
+        monkeypatch.setattr(recommend.platform, "system", lambda: "OpenVMS")
+        rc = recommend.main([])
+        assert rc != 0
+        assert "unsupported OS" in capsys.readouterr().err
+
+    def test_ollama_down_still_reports(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            recommend, "probe_hardware",
+            lambda: recommend.Hardware("cuda", [recommend.Gpu("T4", 16.1)],
+                                       64.0, 16.1, []))
+        def boom(base_url=None):
+            raise recommend.requests.ConnectionError("down")
+        monkeypatch.setattr(recommend.ollama_client, "list_local_models", boom)
+        rc = recommend.main([])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Ollama not reachable" in out
+        assert "worth pulling" in out

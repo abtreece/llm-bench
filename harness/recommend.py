@@ -10,12 +10,19 @@ CLI:
 """
 from __future__ import annotations
 
+import argparse
 import json
+import platform
 import re
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import requests
 import yaml
+
+from harness import ollama_client
 
 REPO = Path(__file__).resolve().parents[1]
 CATALOG_YAML = REPO / "catalog.yaml"
@@ -301,3 +308,81 @@ def render_report(
         out.append("# models.yaml snippet")
         out.append(render_snippet(tiers))
     return "\n".join(out)
+
+
+def _run(cmd: list[str]) -> str | None:
+    """Thin shell: command stdout on success, None if missing/broken."""
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def probe_hardware() -> Hardware:
+    system = platform.system()
+    machine = platform.machine()
+
+    if system == "Darwin":
+        out = _run(["sysctl", "-n", "hw.memsize"])
+        ram_gb = parse_sysctl_memsize(out) if out is not None else None
+        return build_hardware(system, machine, nvidia_out=None,
+                              rocm_out=None, lspci_out=None, ram_gb=ram_gb)
+
+    if system == "Linux":
+        try:
+            ram_gb = parse_meminfo(Path("/proc/meminfo").read_text())
+        except OSError:
+            ram_gb = None
+        nvidia_out = _run(["nvidia-smi", "--query-gpu=name,memory.total",
+                           "--format=csv,noheader,nounits"])
+        # Only shell out to the next tool when the previous one yielded nothing.
+        rocm_out = None
+        lspci_out = None
+        if not (nvidia_out and parse_nvidia_smi(nvidia_out)):
+            rocm_out = _run(["rocm-smi", "--showmeminfo", "vram", "--json"])
+            if not (rocm_out and parse_rocm_smi(rocm_out)):
+                lspci_out = _run(["lspci"])
+        return build_hardware(system, machine, nvidia_out=nvidia_out,
+                              rocm_out=rocm_out, lspci_out=lspci_out,
+                              ram_gb=ram_gb)
+
+    return build_hardware(system, machine, nvidia_out=None, rocm_out=None,
+                          lspci_out=None, ram_gb=None)
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(
+        description="Recommend Ollama models for this host (advisory; "
+                    "never writes models.yaml).")
+    p.add_argument("--headroom-gb", type=float, default=DEFAULT_HEADROOM_GB,
+                   help="memory kept free for KV cache and runtime overhead "
+                        f"(default {DEFAULT_HEADROOM_GB})")
+    args = p.parse_args(argv)
+
+    try:
+        hw = probe_hardware()
+    except RecommendError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    ollama_note = None
+    installed: list[dict] = []
+    try:
+        installed = ollama_client.list_local_models()
+    except requests.RequestException:
+        ollama_note = (
+            f"Ollama not reachable at {ollama_client.DEFAULT_BASE_URL} — "
+            "installed-model tiers skipped.")
+
+    tiers = select_tiers(installed, load_catalog(),
+                         budget_gb=hw.budget_gb, headroom_gb=args.headroom_gb)
+    sys.stdout.write(render_report(hw, tiers, headroom_gb=args.headroom_gb,
+                                   ollama_note=ollama_note))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
