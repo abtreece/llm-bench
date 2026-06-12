@@ -238,3 +238,66 @@ def select_tiers(
          and fits(m["size_gb"], budget_gb, headroom_gb)),
         key=by_size)
     return Tiers(selected, excluded, worth_pulling)
+
+
+def render_snippet(tiers: Tiers) -> str:
+    """models.yaml-shaped YAML of selected + worth-pulling, smallest first."""
+    models = sorted(tiers.selected + tiers.worth_pulling,
+                    key=lambda f: f.size_gb)
+    lines = ["models:"]
+    for f in models:
+        lines.append(f"  - name: {f.name}")
+        lines.append(f"    size_gb: {f.size_gb:.1f}")
+    return "\n".join(lines) + "\n"
+
+
+def render_report(
+    hw: Hardware,
+    tiers: Tiers,
+    *,
+    headroom_gb: float,
+    ollama_note: str | None = None,
+) -> str:
+    out: list[str] = []
+    out.append("# hardware")
+    out.append(f"backend: {hw.backend}")
+    for g in hw.gpus:
+        out.append(f"gpu: {g.name} ({g.vram_gb:.1f} GB VRAM)")
+    if hw.ram_gb is not None:
+        out.append(f"ram: {hw.ram_gb:.1f} GB")
+    out.append(f"budget: {hw.budget_gb:.1f} GB (headroom {headroom_gb:.1f} GB)")
+    for w in hw.warnings:
+        out.append(f"warning: {w}")
+    out.append("")
+
+    if ollama_note:
+        out.append(f"note: {ollama_note}")
+        out.append("")
+    else:
+        out.append("# selected (installed, fits)")
+        for f in tiers.selected:
+            out.append(f"{f.name:<24} {f.size_gb:>5.1f} GB   margin {f.margin_gb:.1f} GB")
+        if not tiers.selected:
+            out.append("(none)")
+        out.append("")
+
+        out.append("# excluded (installed, does not fit)")
+        for f in tiers.excluded:
+            out.append(
+                f"{f.name:<24} {f.size_gb:>5.1f} GB   needs "
+                f"{f.size_gb + headroom_gb:.1f} GB > {hw.budget_gb:.1f} GB budget")
+        if not tiers.excluded:
+            out.append("(none)")
+        out.append("")
+
+    out.append("# worth pulling (catalog, fits, not installed)")
+    for f in tiers.worth_pulling:
+        out.append(f"{f.name:<24} {f.size_gb:>5.1f} GB   ollama pull {f.name}")
+    if not tiers.worth_pulling:
+        out.append("(none)")
+    out.append("")
+
+    if tiers.selected or tiers.worth_pulling:
+        out.append("# models.yaml snippet")
+        out.append(render_snippet(tiers))
+    return "\n".join(out)

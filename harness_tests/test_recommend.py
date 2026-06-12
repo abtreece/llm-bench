@@ -1,5 +1,6 @@
 """Tests for harness/recommend.py — pure-function core, no subprocess/network."""
 import pytest
+import yaml
 
 from harness import ollama_client, recommend
 
@@ -229,3 +230,63 @@ class TestTierSelection:
         tiers = recommend.select_tiers(installed, [],
                                        budget_gb=16.0, headroom_gb=2.0)
         assert [m.name for m in tiers.selected] == ["small", "big"]
+
+
+def make_hw(**kw):
+    base = dict(backend="cuda",
+                gpus=[recommend.Gpu("Tesla T4", 16.1)],
+                ram_gb=67.4, budget_gb=16.1, warnings=[])
+    base.update(kw)
+    return recommend.Hardware(**base)
+
+
+def make_tiers(selected=(), excluded=(), worth=()):
+    return recommend.Tiers(list(selected), list(excluded), list(worth))
+
+
+class TestRender:
+    def test_report_sections_and_numbers(self):
+        tiers = make_tiers(
+            selected=[recommend.ModelFit("qwen2.5:14b", 9.0, 5.1)],
+            excluded=[recommend.ModelFit("qwen3-coder:30b", 19.0, -4.9)],
+            worth=[recommend.ModelFit("qwen2.5-coder:14b", 9.0, 5.1)],
+        )
+        text = recommend.render_report(make_hw(), tiers, headroom_gb=2.0)
+        assert "backend: cuda" in text
+        assert "Tesla T4 (16.1 GB VRAM)" in text
+        assert "budget: 16.1 GB (headroom 2.0 GB)" in text
+        assert "margin 5.1 GB" in text
+        assert "needs 21.0 GB > 16.1 GB budget" in text
+        assert "ollama pull qwen2.5-coder:14b" in text
+
+    def test_warnings_render(self):
+        text = recommend.render_report(
+            make_hw(warnings=["driver gap"]), make_tiers(), headroom_gb=2.0)
+        assert "warning: driver gap" in text
+
+    def test_ollama_down_note_replaces_installed_tiers(self):
+        text = recommend.render_report(
+            make_hw(), make_tiers(), headroom_gb=2.0,
+            ollama_note="Ollama not reachable at http://localhost:11434")
+        assert "Ollama not reachable" in text
+        assert "# selected" not in text and "# excluded" not in text
+
+    def test_empty_tiers_render_none(self):
+        text = recommend.render_report(make_hw(), make_tiers(), headroom_gb=2.0)
+        assert text.count("(none)") >= 3
+
+    def test_snippet_smallest_first_and_yaml_parseable(self):
+        tiers = make_tiers(
+            selected=[recommend.ModelFit("qwen2.5:14b", 9.0, 5.1)],
+            worth=[recommend.ModelFit("qwen2.5-coder:1.5b", 1.0, 13.1)],
+        )
+        snippet = recommend.render_snippet(tiers)
+        data = yaml.safe_load(snippet)
+        assert data == {"models": [
+            {"name": "qwen2.5-coder:1.5b", "size_gb": 1.0},
+            {"name": "qwen2.5:14b", "size_gb": 9.0},
+        ]}
+
+    def test_empty_snippet_is_omitted_from_report(self):
+        text = recommend.render_report(make_hw(), make_tiers(), headroom_gb=2.0)
+        assert "models.yaml snippet" not in text
