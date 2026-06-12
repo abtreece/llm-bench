@@ -86,6 +86,7 @@ CSV_FIELDS = [
     "reference_diff_lines",
     "model_diff_lines",
     "blocked_paths",
+    "done_reason",
     "error",
 ]
 
@@ -203,6 +204,23 @@ def status_line(model: str, case_id: str, attempt: int, status: str, ms: int) ->
     return f"[{model:>22}] case {case_id} attempt {attempt} → {status} ({ms} ms)"
 
 
+def classify_status(row: dict) -> str:
+    err = row["error"]
+    if err.startswith("timeout"):
+        return "TIMEOUT"
+    if err.startswith("infra_error"):
+        return "INFRA"
+    if err.startswith("truncated"):
+        return "TRUNC"
+    if err.startswith("parse_error"):
+        return "PARSE_ERR"
+    if row["target_passed"] and row["regressions"] == 0:
+        return "PASS"
+    if row["target_passed"]:
+        return "REGRESS"
+    return "FAIL"
+
+
 def compute_baseline(case: Case, run_id: str) -> set[str]:
     """Full-suite failures in the broken+test state. Model/attempt independent,
     so computed once per case instead of once per row."""
@@ -246,6 +264,7 @@ def run_one(
         reference_diff_lines=0,
         model_diff_lines=0,
         blocked_paths="",
+        done_reason="",
         error="",
     )
     try:
@@ -285,6 +304,12 @@ def run_one(
                 model, SYSTEM_PROMPT, user_msg,
                 timeout_s=timeout_s, temperature=temperature, seed=seed,
             )
+        except ollama_client.ChatTimeout as e:
+            # Scored as a model failure: on fixed hardware, "too slow to
+            # answer" is a property of the model, not the infrastructure.
+            row["error"] = f"timeout:{e}"
+            row["latency_ms"] = int((time.monotonic() - t0) * 1000)
+            return row
         except Exception as e:
             row["error"] = f"infra_error:{type(e).__name__}:{e}"
             row["latency_ms"] = int((time.monotonic() - t0) * 1000)
@@ -294,6 +319,7 @@ def run_one(
         row["load_ms"] = result.load_duration_ns // 1_000_000
         row["prompt_tokens"] = result.prompt_eval_count
         row["completion_tokens"] = result.eval_count
+        row["done_reason"] = result.done_reason
 
         attempt_artifacts = artifacts_dir / slugify(model) / case.id / str(attempt)
         attempt_artifacts.mkdir(parents=True, exist_ok=True)
@@ -309,7 +335,12 @@ def run_one(
         try:
             blocks = scorer.extract_blocks(result.content)
         except ValueError as e:
-            row["error"] = f"parse_error:{e}"
+            if result.done_reason == "length":
+                # Generation hit the token limit mid-file — a config/capacity
+                # issue, not evidence the model can't follow the format.
+                row["error"] = f"truncated:{e}"
+            else:
+                row["error"] = f"parse_error:{e}"
             return row
 
         row["schema_ok"] = True
@@ -395,6 +426,15 @@ def main(argv: list[str] | None = None) -> int:
                 ollama_client.warm_up(model, timeout_s=args.timeout)
             except Exception as e:
                 print(f"[{model:>22}] warm-up failed: {e} — skipping model")
+                # Leave a trace in the CSV so the report can show the model
+                # was skipped instead of silently omitting it.
+                skip_row = {f: "" for f in CSV_FIELDS}
+                skip_row.update(
+                    run_id=run_id, model=model, case_id="*", attempt=0,
+                    error=f"infra_error:warmup_failed:{type(e).__name__}:{e}",
+                )
+                w.writerow(skip_row)
+                fh.flush()
                 continue
             for case in cases:
                 for attempt in range(1, args.attempts + 1):
@@ -404,13 +444,9 @@ def main(argv: list[str] | None = None) -> int:
                         timeout_s=args.timeout,
                         test_timeout_s=args.test_timeout,
                     )
-                    w.writerow(row); fh.flush()
-                    status = (
-                        "PASS" if row["target_passed"] and row["regressions"] == 0
-                        else ("REGRESS" if row["target_passed"] else
-                              ("PARSE_ERR" if not row["schema_ok"] and row["error"].startswith("parse_error")
-                               else ("INFRA" if row["error"].startswith("infra_error") else "FAIL")))
-                    )
+                    w.writerow(row)
+                    fh.flush()
+                    status = classify_status(row)
                     print(status_line(model, case.id, attempt, status, row["latency_ms"]))
     print(f"done. csv -> {csv_path}")
     return 0

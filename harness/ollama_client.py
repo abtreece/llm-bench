@@ -12,6 +12,15 @@ DEFAULT_TIMEOUT_S = 300
 DEFAULT_NUM_CTX = 16384
 
 
+class ChatTimeout(Exception):
+    """The model did not finish generating within the read timeout.
+
+    Distinct from connection-level failures: on fixed hardware this is a
+    property of the model (too slow), so the harness scores it as a model
+    outcome rather than excluding the row as infra noise.
+    """
+
+
 @dataclass(frozen=True)
 class ChatResult:
     content: str
@@ -20,6 +29,7 @@ class ChatResult:
     total_duration_ns: int
     load_duration_ns: int
     eval_duration_ns: int
+    done_reason: str  # "stop" = natural end; "length" = truncated by token limit
 
 
 def chat(
@@ -49,11 +59,14 @@ def chat(
         "options": options,
     }
     # (connect, read) — read covers the full non-streamed generation.
-    r = requests.post(
-        f"{base_url}/api/chat",
-        json=payload,
-        timeout=(10, timeout_s),
-    )
+    try:
+        r = requests.post(
+            f"{base_url}/api/chat",
+            json=payload,
+            timeout=(10, timeout_s),
+        )
+    except requests.exceptions.ReadTimeout as e:
+        raise ChatTimeout(f"no response from {model} after {timeout_s}s") from e
     r.raise_for_status()
     data = r.json()
     msg = data.get("message") or {}
@@ -64,6 +77,7 @@ def chat(
         total_duration_ns=int(data.get("total_duration", 0)),
         load_duration_ns=int(data.get("load_duration", 0)),
         eval_duration_ns=int(data.get("eval_duration", 0)),
+        done_reason=str(data.get("done_reason", "")),
     )
 
 
