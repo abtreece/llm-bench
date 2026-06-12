@@ -1,6 +1,8 @@
 id: '002'
 title: subtract returns b - a instead of a - b
 difficulty: obvious
+category: coding
+grading: pytest
 target_file: app/money.py
 prompt: |-
   The subtract(a, b) function in app/money.py is returning the wrong result. The test in tests/test_002_subtract_order.py is failing. Read the failing test and the function, then produce a corrected app/money.py. Do not modify the test.

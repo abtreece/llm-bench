@@ -1,6 +1,8 @@
 id: '001'
 title: minor_to_major mishandles currencies with non-2-decimal minor units
 difficulty: obvious
+category: coding
+grading: pytest
 target_file: app/money.py
 prompt: |-
   The minor_to_major(minor, currency) function in app/money.py is not returning the right value for some currencies. The test in tests/test_001_minor_to_major_currency.py is failing. Read the failing test and the CURRENCIES table in app/money.py, then produce a corrected app/money.py. Do not modify the test.

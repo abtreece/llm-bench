@@ -49,6 +49,8 @@ class Case:
     id: str
     title: str
     difficulty: str  # obvious | moderate | subtle | adversarial
+    category: str  # coding | data-analysis
+    grading: str  # pytest | refusal
     test_filename: str  # relative to repo root, e.g. tests/test_001_x.py
     prompt: str
     old: str  # substring to find in app/money.py (must be unique)
@@ -83,7 +85,7 @@ def _apply_break(clean: str, case: Case) -> str:
 
 
 def _yaml_for(case: Case, clean_money: str) -> dict:
-    if case.difficulty == "adversarial":
+    if case.grading == "refusal":
         breaking = ""
         reference = ""
     else:
@@ -95,6 +97,8 @@ def _yaml_for(case: Case, clean_money: str) -> dict:
         "id": case.id,
         "title": case.title,
         "difficulty": case.difficulty,
+        "category": case.category,
+        "grading": case.grading,
         "target_file": MONEY_REL,
         "prompt": _Literal(case.prompt),
         "breaking_patch": _Literal(breaking) if breaking else "",
@@ -136,7 +140,7 @@ def _run_pytest(test_path: str, cwd: Path) -> tuple[int, str]:
 
 
 def _verify(case: Case, data: dict) -> None:
-    if case.difficulty == "adversarial":
+    if case.grading == "refusal":
         return
     ignore_cache = shutil.ignore_patterns("__pycache__")
     with tempfile.TemporaryDirectory(prefix="llmbench_verify_") as td:
@@ -176,6 +180,8 @@ def build_cases() -> list[Case]:
             id="001",
             title="minor_to_major mishandles currencies with non-2-decimal minor units",
             difficulty="obvious",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_001_minor_to_major_currency.py",
             prompt=(
                 "The minor_to_major(minor, currency) function in app/money.py is "
@@ -210,6 +216,8 @@ def build_cases() -> list[Case]:
             id="002",
             title="subtract returns b - a instead of a - b",
             difficulty="obvious",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_002_subtract_order.py",
             prompt=(
                 "The subtract(a, b) function in app/money.py is returning the "
@@ -234,6 +242,8 @@ def build_cases() -> list[Case]:
             id="003",
             title="format_amount always uses 2 decimal places",
             difficulty="obvious",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_003_format_amount_decimals.py",
             prompt=(
                 "The format_amount function in app/money.py is producing the "
@@ -270,6 +280,8 @@ def build_cases() -> list[Case]:
             id="004",
             title="negate hardcodes the currency to USD",
             difficulty="obvious",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_004_negate_currency.py",
             prompt=(
                 "The negate function in app/money.py is changing the currency "
@@ -297,6 +309,8 @@ def build_cases() -> list[Case]:
             id="005",
             title="add does not validate that both operands share a currency",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_005_add_currency_check.py",
             prompt=(
                 "Adding two Money values with different currencies should raise "
@@ -331,6 +345,8 @@ def build_cases() -> list[Case]:
             id="006",
             title="parse_money rejects strings containing comma thousands separators",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_006_parse_thousands_separator.py",
             prompt=(
                 "The parse_money function in app/money.py should accept numeric "
@@ -358,6 +374,8 @@ def build_cases() -> list[Case]:
             id="007",
             title="parse_money_str accepts only the prefix form (USD 1.23)",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_007_parse_money_str_suffix.py",
             prompt=(
                 "The parse_money_str function in app/money.py should accept "
@@ -386,6 +404,8 @@ def build_cases() -> list[Case]:
             id="008",
             title="allocate distributes the remainder right-to-left instead of left-to-right",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_008_allocate_remainder_order.py",
             prompt=(
                 "When allocate(m, ratios) splits a Money value and there is a "
@@ -430,6 +450,8 @@ def build_cases() -> list[Case]:
             id="009",
             title="compare does not raise on currency mismatch",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_009_compare_mismatch.py",
             prompt=(
                 "Comparing two Money values with different currencies should "
@@ -464,6 +486,8 @@ def build_cases() -> list[Case]:
             id="010",
             title="round_to_minor_units default rounding mode is wrong",
             difficulty="subtle",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_010_default_rounding_mode.py",
             prompt=(
                 "The test in tests/test_010_default_rounding_mode.py is "
@@ -492,6 +516,8 @@ def build_cases() -> list[Case]:
             id="011",
             title="percentage uses integer division and drops the fractional part",
             difficulty="subtle",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_011_percentage_fractional.py",
             prompt=(
                 "The percentage(m, pct) function in app/money.py works "
@@ -521,6 +547,8 @@ def build_cases() -> list[Case]:
             id="012",
             title="Implement currency conversion (no exchange rates provided)",
             difficulty="adversarial",
+            category="coding",
+            grading="refusal",
             test_filename="tests/test_012_convert.py",
             prompt=(
                 "Add a function convert(m: Money, target_currency: str) -> Money "

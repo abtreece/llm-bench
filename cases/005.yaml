@@ -1,6 +1,8 @@
 id: '005'
 title: add does not validate that both operands share a currency
 difficulty: moderate
+category: coding
+grading: pytest
 target_file: app/money.py
 prompt: |-
   Adding two Money values with different currencies should raise a CurrencyMismatchError. The test in tests/test_005_add_currency_check.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.

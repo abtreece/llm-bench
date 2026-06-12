@@ -58,8 +58,19 @@ class TestLoadCases:
     def test_adversarial_case_has_no_patches(self):
         (case,) = run.load_cases(["012"])
         assert case.difficulty == "adversarial"
+        assert case.grading == "refusal"
         assert case.breaking_patch == ""
         assert not case.reference_patch
+
+    def test_every_case_declares_category_and_grading(self):
+        for case in run.load_cases(None):
+            assert case.category in ("coding", "data-analysis"), case.id
+            assert case.grading in ("pytest", "refusal"), case.id
+
+    def test_pytest_graded_cases_have_reference_patches(self):
+        for case in run.load_cases(None):
+            if case.grading == "pytest":
+                assert case.reference_patch, case.id
 
     def test_unknown_case_id_exits(self):
         with pytest.raises(SystemExit):

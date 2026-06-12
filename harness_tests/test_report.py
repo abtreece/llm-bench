@@ -87,6 +87,26 @@ class TestRender:
             if "`model-a`" in line:
                 assert "✅" in line
 
+    def test_per_category_breakdown_when_multiple_categories(self, monkeypatch):
+        monkeypatch.setattr(report, "load_case_meta", lambda: {
+            "001": {"difficulty": "obvious", "category": "coding"},
+            "013": {"difficulty": "moderate", "category": "data-analysis"},
+        })
+        rows = [
+            make_row("model-a", case_id="001", passed=True),
+            make_row("model-a", case_id="013", passed=False),
+        ]
+        text = report.render(rows)
+        assert "## Per-category pass-rate" in text
+        assert "data-analysis" in text
+
+    def test_no_category_breakdown_for_single_category(self, monkeypatch):
+        monkeypatch.setattr(report, "load_case_meta", lambda: {
+            "001": {"difficulty": "obvious", "category": "coding"},
+        })
+        text = report.render([make_row("model-a", case_id="001", passed=True)])
+        assert "## Per-category pass-rate" not in text
+
     def test_error_kinds_counted(self):
         rows = [
             make_row("m", attempt=1, err="timeout:300s"),

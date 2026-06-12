@@ -95,7 +95,9 @@ CSV_FIELDS = [
 class Case:
     id: str
     title: str
-    difficulty: str
+    difficulty: str  # obvious | moderate | subtle | adversarial
+    category: str  # coding | data-analysis
+    grading: str  # pytest | refusal
     target_file: str
     prompt: str
     breaking_patch: str
@@ -124,6 +126,8 @@ def load_cases(only: list[str] | None) -> list[Case]:
                 id=d["id"],
                 title=d["title"],
                 difficulty=d["difficulty"],
+                category=d["category"],
+                grading=d["grading"],
                 target_file=d["target_file"],
                 prompt=d["prompt"],
                 breaking_patch=d["breaking_patch"],
@@ -287,7 +291,7 @@ def run_one(
         git_apply(case.test_patch, work)
 
         test_path = parse_test_path_from_patch(case.test_patch)
-        if case.difficulty != "adversarial" and not baseline_failures:
+        if case.grading == "pytest" and not baseline_failures:
             row["error"] = "baseline_clean"
             return row
 
@@ -338,9 +342,9 @@ def run_one(
         attempt_artifacts.mkdir(parents=True, exist_ok=True)
         (attempt_artifacts / "response.txt").write_text(result.content)
 
-        # Adversarial cases grade pushback, not patches: pass means the model
-        # refused (no file blocks + a refusal phrase). pytest never runs.
-        if case.difficulty == "adversarial":
+        # Refusal-graded cases grade pushback, not patches: pass means the
+        # model refused (no file blocks + a refusal phrase). pytest never runs.
+        if case.grading == "refusal":
             row["schema_ok"] = True
             row["target_passed"] = scorer.grade_refusal(result.content)
             return row
@@ -420,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print("# computing per-case baselines...")
     baselines = {
-        case.id: set() if case.difficulty == "adversarial"
+        case.id: set() if case.grading == "refusal"
         else compute_baseline(case, run_id, args.test_timeout)
         for case in cases
     }
