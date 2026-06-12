@@ -5,7 +5,7 @@ category: coding
 grading: pytest
 target_file: app/money.py
 prompt: |-
-  The percentage(m, pct) function in app/money.py works correctly for whole-number percentages but produces wrong results for fractional percentages. The test in tests/test_011_percentage_fractional.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
+  The percentage(m, pct) function in app/money.py is producing wrong results for some inputs. The test in tests/test_011_percentage_fractional.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
 breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -116,7 +116,7 @@\n def\
   \ percentage(m: Money, pct) -> Money:\n     \"\"\"Return pct% of m. pct=10 means\
   \ 10%.\"\"\"\n     p = pct if isinstance(pct, Decimal) else Decimal(str(pct))\n\
@@ -15,7 +15,7 @@ breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -116,7 +116,7 @@\n d
 test_patch: |
   --- /dev/null
   +++ b/tests/test_011_percentage_fractional.py
-  @@ -0,0 +1,11 @@
+  @@ -0,0 +1,10 @@
   +from decimal import Decimal
   +from app.money import Money, percentage
   +
@@ -25,7 +25,6 @@ test_patch: |
   +
   +
   +def test_percentage_decimal_rate():
-  +    # 33.33% of $100.00 = $33.33
   +    assert percentage(Money(Decimal("100.00"), "USD"), Decimal("33.33")) == Money(Decimal("33.33"), "USD")
 reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -116,7 +116,7 @@\n def\
   \ percentage(m: Money, pct) -> Money:\n     \"\"\"Return pct% of m. pct=10 means\

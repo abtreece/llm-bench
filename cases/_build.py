@@ -491,9 +491,9 @@ def build_cases() -> list[Case]:
             test_filename="tests/test_010_default_rounding_mode.py",
             prompt=(
                 "The test in tests/test_010_default_rounding_mode.py is "
-                "failing. Read the failing test, identify which function in "
-                "app/money.py is rounding incorrectly on .5 boundaries, and "
-                "produce a corrected app/money.py. Do not modify the test."
+                "failing. Read the failing test, identify the function in "
+                "app/money.py responsible, and produce a corrected "
+                "app/money.py. Do not modify the test."
             ),
             old="def round_to_minor_units(m: Money, rounding: str = ROUND_HALF_EVEN) -> Money:",
             new="def round_to_minor_units(m: Money, rounding: str = \"ROUND_HALF_UP\") -> Money:",
@@ -502,13 +502,11 @@ def build_cases() -> list[Case]:
                 "from app.money import Money, round_to_minor_units\n"
                 "\n"
                 "\n"
-                "def test_round_half_with_even_neighbor_rounds_down():\n"
-                "    # 0.025 -> 0.02 (preceding digit 2 is even, .5 rounds toward even)\n"
+                "def test_round_two_and_a_half_tenths():\n"
                 "    assert round_to_minor_units(Money(Decimal(\"0.025\"), \"USD\")).amount == Decimal(\"0.02\")\n"
                 "\n"
                 "\n"
-                "def test_round_half_with_zero_neighbor_rounds_down():\n"
-                "    # 0.005 -> 0.00 (preceding digit 0 is even)\n"
+                "def test_round_half_a_tenth():\n"
                 "    assert round_to_minor_units(Money(Decimal(\"0.005\"), \"USD\")).amount == Decimal(\"0.00\")\n"
             ),
         ),
@@ -520,9 +518,8 @@ def build_cases() -> list[Case]:
             grading="pytest",
             test_filename="tests/test_011_percentage_fractional.py",
             prompt=(
-                "The percentage(m, pct) function in app/money.py works "
-                "correctly for whole-number percentages but produces wrong "
-                "results for fractional percentages. The test in "
+                "The percentage(m, pct) function in app/money.py is producing "
+                "wrong results for some inputs. The test in "
                 "tests/test_011_percentage_fractional.py is failing. Read the "
                 "failing test and produce a corrected app/money.py. Do not "
                 "modify the test."
@@ -539,7 +536,6 @@ def build_cases() -> list[Case]:
                 "\n"
                 "\n"
                 "def test_percentage_decimal_rate():\n"
-                "    # 33.33% of $100.00 = $33.33\n"
                 "    assert percentage(Money(Decimal(\"100.00\"), \"USD\"), Decimal(\"33.33\")) == Money(Decimal(\"33.33\"), \"USD\")\n"
             ),
         ),
