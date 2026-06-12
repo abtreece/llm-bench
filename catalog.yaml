@@ -1,0 +1,22 @@
+# Curated coder-capable models for harness.recommend suggestions.
+# size_gb = on-disk size of the default (q4) tag, per the Ollama registry
+# (verified 2026-06-12). Spanning 1.5B-32B so every hardware tier gets
+# at least one suggestion.
+catalog:
+  - name: qwen2.5-coder:1.5b
+    size_gb: 1.0
+    notes: floor sanity check
+  - name: qwen2.5-coder:7b
+    size_gb: 4.7
+  - name: qwen3:8b
+    size_gb: 5.2
+  - name: deepseek-coder-v2:16b
+    size_gb: 8.9
+  - name: qwen2.5-coder:14b
+    size_gb: 9.0
+  - name: qwen3:14b
+    size_gb: 9.3
+  - name: qwen3-coder:30b
+    size_gb: 19.0
+  - name: qwen2.5-coder:32b
+    size_gb: 20.0

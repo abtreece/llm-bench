@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
 
 import requests
 
@@ -92,7 +91,20 @@ def warm_up(
          base_url=base_url, timeout_s=timeout_s, num_ctx=512)
 
 
-def list_local_models(base_url: str = DEFAULT_BASE_URL) -> Iterable[str]:
+def models_from_tags(data: dict) -> list[dict]:
+    """Pure extraction from an /api/tags payload: [{"name", "size_gb"}].
+
+    Ollama reports size in bytes; GB = bytes / 1e9 to match the registry's
+    decimal-GB convention used in models.yaml and catalog.yaml.
+    """
+    # `or []`: Ollama's Go server marshals a nil slice as {"models": null}.
+    return [
+        {"name": m["name"], "size_gb": int(m.get("size", 0)) / 1e9}
+        for m in data.get("models") or []
+    ]
+
+
+def list_local_models(base_url: str = DEFAULT_BASE_URL) -> list[dict]:
     r = requests.get(f"{base_url}/api/tags", timeout=10)
     r.raise_for_status()
-    return [m["name"] for m in r.json().get("models", [])]
+    return models_from_tags(r.json())
