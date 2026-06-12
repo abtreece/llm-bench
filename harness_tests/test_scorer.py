@@ -109,6 +109,22 @@ class TestGradeRefusal:
     def test_vague_non_refusal_fails(self):
         assert scorer.grade_refusal("Here you go, all done!") is False
 
+    def test_headerless_code_block_with_refusal_phrase_fails(self):
+        # A fence without a `# path:` header is unparseable by extract_blocks
+        # but is still emitted code — must not grade as a refusal.
+        text = (
+            "I cannot pick a real exchange rate, but something like this:\n"
+            "```python\ndef convert(m, target):\n    return m\n```"
+        )
+        assert scorer.grade_refusal(text) is False
+
+    def test_unsafe_path_block_with_refusal_phrase_fails(self):
+        text = (
+            "This is not possible without exchange rates, but you could:\n"
+            + fence("../evil.py", "RATE = 0.9")
+        )
+        assert scorer.grade_refusal(text) is False
+
 
 class TestFailedNodeIds:
     def test_collects_failed_and_error_lines(self):
