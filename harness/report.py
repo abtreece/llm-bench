@@ -44,11 +44,13 @@ def load_case_difficulty() -> dict[str, str]:
 
 
 def load_model_sizes() -> dict[str, float]:
+    # Missing file is fine (sizes render as "-"); a malformed one should
+    # surface loudly rather than silently dropping the column.
     try:
         data = yaml.safe_load(MODELS_YAML.read_text())
-        return {m["name"]: float(m.get("size_gb", 0)) for m in data["models"]}
-    except Exception:
+    except FileNotFoundError:
         return {}
+    return {m["name"]: float(m.get("size_gb", 0)) for m in data["models"]}
 
 
 def _is_harness_row(r: dict) -> bool:
@@ -85,6 +87,12 @@ def render(rows: list[dict]) -> str:
     out.append(f"- rows: {len(rows)} ({len(scored)} scored, {len(excluded)} excluded as harness/infra)")
     out.append(f"- models: {len(by_model)}")
     out.append(f"- cases: {len(by_case)}")
+    skipped_models = sorted({r["model"] for r in excluded} - set(by_model))
+    if skipped_models:
+        out.append(
+            "- ⚠ models with no scored rows (all attempts excluded): "
+            + ", ".join(f"`{m}`" for m in skipped_models)
+        )
     out.append("")
 
     # Per-model stats, reused by summary + recommendation.
@@ -102,29 +110,41 @@ def render(rows: list[dict]) -> str:
             if toks > 0 and dur_ms > 0:
                 tok_per_s.append(toks / (dur_ms / 1000.0))
         parse_errs = sum(1 for r in rs if (r.get("error") or "").startswith("parse_error"))
+        timeouts = sum(1 for r in rs if (r.get("error") or "").startswith("timeout"))
+        # Attempt 1 is the greedy (temperature 0) sample; later attempts are
+        # temperature 0.4, so pass@1 is reported separately from the pooled rate.
+        first = [r for r in rs if str(r.get("attempt", "")).strip() == "1"]
         stats[model] = {
             "attempts": len(rs),
             "passed": passed,
             "rate": passed / len(rs) if rs else 0.0,
+            "pass1": sum(1 for r in first if clean_pass(r)),
+            "n1": len(first),
             "mean_regs": statistics.mean(regs) if regs else 0.0,
             "med_lat": int(statistics.median(lats)) if lats else 0,
             "tok_s": statistics.mean(tok_per_s) if tok_per_s else 0.0,
             "parse_errs": parse_errs,
+            "timeouts": timeouts,
             "size_gb": sizes.get(model, 0.0),
         }
 
     out.append("## Per-model summary")
     out.append("")
-    out.append("| model | size (GB) | attempts | pass-rate | parse errs | mean regressions | median latency | mean tok/s |")
-    out.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+    out.append("| model | size (GB) | attempts | pass@1 | pass-rate (all) | parse errs | timeouts | mean regressions | median latency | mean tok/s |")
+    out.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for model in sorted(stats):
         s = stats[model]
         lat = f"{s['med_lat']/1000:.0f}s" if s["med_lat"] else "-"
         size = f"{s['size_gb']:.1f}" if s["size_gb"] else "-"
         tok = f"{s['tok_s']:.1f}" if s["tok_s"] else "-"
+        p1 = (
+            f"{s['pass1']}/{s['n1']} ({100*s['pass1']/s['n1']:.0f}%)"
+            if s["n1"] else "-"
+        )
         out.append(
-            f"| `{model}` | {size} | {s['attempts']} | "
-            f"{s['passed']}/{s['attempts']} ({100*s['rate']:.0f}%) | {s['parse_errs']} | "
+            f"| `{model}` | {size} | {s['attempts']} | {p1} | "
+            f"{s['passed']}/{s['attempts']} ({100*s['rate']:.0f}%) | "
+            f"{s['parse_errs']} | {s['timeouts']} | "
             f"{s['mean_regs']:.2f} | {lat} | {tok} |"
         )
     out.append("")
@@ -160,13 +180,15 @@ def render(rows: list[dict]) -> str:
     frontier: list[str] = []
     best_lat = None
     for model, s in ranked:
-        on = best_lat is None or (s["med_lat"] and s["med_lat"] < best_lat)
+        # A model with no recorded latency can't claim a frontier spot —
+        # there is nothing to trade off against.
+        on = s["med_lat"] > 0 and (best_lat is None or s["med_lat"] < best_lat)
         if on:
             frontier.append(model)
-            best_lat = s["med_lat"] or best_lat
+            best_lat = s["med_lat"]
+        lat = f"{s['med_lat']/1000:.0f}s" if s["med_lat"] else "-"
         out.append(
-            f"| `{model}` | {100*s['rate']:.0f}% | "
-            f"{s['med_lat']/1000:.0f}s | {'✅' if on else ''} |"
+            f"| `{model}` | {100*s['rate']:.0f}% | {lat} | {'✅' if on else ''} |"
         )
     out.append("")
 
@@ -183,8 +205,9 @@ def render(rows: list[dict]) -> str:
             f"- **Best accuracy:** `{best}` — "
             f"{100*stats[best]['rate']:.0f}% clean-pass at ~{stats[best]['med_lat']/1000:.0f}s/case.{caveat}"
         )
-        # Sweet spot: the frontier model with the best rate-per-second tradeoff
-        # (highest rate among models at most 2x faster than the most accurate).
+        # Sweet spot: the highest-rate frontier model after the best one
+        # (strictly faster by construction) that stays within 15 points of
+        # the best pass-rate.
         faster = [m for m in frontier[1:] if stats[m]["rate"] >= stats[best]["rate"] - 0.15]
         if faster:
             sweet = faster[0]
