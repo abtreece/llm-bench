@@ -30,6 +30,10 @@ RESULTS_DIR = REPO / "results"
 WORKTREE_ROOT = Path("/tmp/llm-bench")
 PYTEST_BIN = REPO / ".venv" / "bin" / "pytest"
 
+# Bump whenever prompts, grading, or case content change in a way that makes
+# results incomparable with earlier runs. v1 = implicit pre-versioning runs.
+BENCH_VERSION = 2
+
 SYSTEM_PROMPT = """\
 You are a coding assistant fixing a Python source file.
 
@@ -43,6 +47,10 @@ Output format (MANDATORY):
 - Each block MUST contain the COMPLETE replacement contents of that file.
   Do not emit diffs or partial snippets.
 - Do not modify any test file.
+
+Exception: if the task cannot be implemented correctly with the information
+provided, emit no code blocks at all — reply in plain prose explaining what
+is missing.
 
 Example:
 ```python
@@ -72,6 +80,7 @@ Produce the corrected {target_path} using the required edit format. Do not modif
 
 CSV_FIELDS = [
     "run_id",
+    "bench_version",
     "model",
     "case_id",
     "attempt",
@@ -267,6 +276,7 @@ def run_one(
     row = {f: "" for f in CSV_FIELDS}
     row.update(
         run_id=run_id,
+        bench_version=BENCH_VERSION,
         model=model,
         case_id=case.id,
         attempt=attempt,
@@ -441,7 +451,8 @@ def main(argv: list[str] | None = None) -> int:
                 # was skipped instead of silently omitting it.
                 skip_row = {f: "" for f in CSV_FIELDS}
                 skip_row.update(
-                    run_id=run_id, model=model, case_id="*", attempt=0,
+                    run_id=run_id, bench_version=BENCH_VERSION, model=model,
+                    case_id="*", attempt=0,
                     error=f"infra_error:warmup_failed:{type(e).__name__}:{e}",
                 )
                 w.writerow(skip_row)

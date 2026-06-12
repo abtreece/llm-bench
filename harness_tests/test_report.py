@@ -107,6 +107,18 @@ class TestRender:
         text = report.render([make_row("model-a", case_id="001", passed=True)])
         assert "## Per-category pass-rate" not in text
 
+    def test_bench_version_shown_and_mixed_versions_flagged(self):
+        v2 = make_row("model-a", passed=True) | {"bench_version": "2"}
+        v3 = make_row("model-a", attempt=2, passed=True) | {"bench_version": "3"}
+        assert "bench_version: 2\n" in report.render([v2, v2])
+        assert "not comparable" not in report.render([v2, v2])
+        assert "bench_version: 2, 3" in report.render([v2, v3])
+        assert "not comparable" in report.render([v2, v3])
+
+    def test_rows_without_bench_version_render_quietly(self):
+        text = report.render([make_row("model-a", passed=True)])
+        assert "bench_version" not in text
+
     def test_error_kinds_counted(self):
         rows = [
             make_row("m", attempt=1, err="timeout:300s"),

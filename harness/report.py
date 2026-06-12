@@ -90,6 +90,10 @@ def render(rows: list[dict]) -> str:
     out.append(f"- rows: {len(rows)} ({len(scored)} scored, {len(excluded)} excluded as harness/infra)")
     out.append(f"- models: {len(by_model)}")
     out.append(f"- cases: {len(by_case)}")
+    versions = sorted({v for r in rows if (v := (r.get("bench_version") or "").strip())})
+    if versions:
+        flag = " ⚠ mixed versions — rows are not comparable" if len(versions) > 1 else ""
+        out.append(f"- bench_version: {', '.join(versions)}{flag}")
     skipped_models = sorted({r["model"] for r in excluded} - set(by_model))
     if skipped_models:
         out.append(
