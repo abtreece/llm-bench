@@ -118,6 +118,10 @@ def render(rows: list[dict]) -> str:
                 tok_per_s.append(toks / (dur_ms / 1000.0))
         parse_errs = sum(1 for r in rs if (r.get("error") or "").startswith("parse_error"))
         timeouts = sum(1 for r in rs if (r.get("error") or "").startswith("timeout"))
+        # Attempts where the model tried to write outside app/ (tests,
+        # conftest, ...). The sandbox neutralizes these, but trying is an
+        # instruction-following failure worth seeing per model.
+        blocked = sum(1 for r in rs if (r.get("blocked_paths") or "").strip())
         # Attempt 1 is the greedy (temperature 0) sample; later attempts are
         # temperature 0.4, so pass@1 is reported separately from the pooled rate.
         first = [r for r in rs if str(r.get("attempt", "")).strip() == "1"]
@@ -132,13 +136,14 @@ def render(rows: list[dict]) -> str:
             "tok_s": statistics.mean(tok_per_s) if tok_per_s else 0.0,
             "parse_errs": parse_errs,
             "timeouts": timeouts,
+            "blocked": blocked,
             "size_gb": sizes.get(model, 0.0),
         }
 
     out.append("## Per-model summary")
     out.append("")
-    out.append("| model | size (GB) | attempts | pass@1 | pass-rate (all) | parse errs | timeouts | mean regressions | median latency | mean tok/s |")
-    out.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    out.append("| model | size (GB) | attempts | pass@1 | pass-rate (all) | parse errs | timeouts | blocked writes | mean regressions | median latency | mean tok/s |")
+    out.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for model in sorted(stats):
         s = stats[model]
         lat = f"{s['med_lat']/1000:.0f}s" if s["med_lat"] else "-"
@@ -151,7 +156,7 @@ def render(rows: list[dict]) -> str:
         out.append(
             f"| `{model}` | {size} | {s['attempts']} | {p1} | "
             f"{s['passed']}/{s['attempts']} ({100*s['rate']:.0f}%) | "
-            f"{s['parse_errs']} | {s['timeouts']} | "
+            f"{s['parse_errs']} | {s['timeouts']} | {s['blocked']} | "
             f"{s['mean_regs']:.2f} | {lat} | {tok} |"
         )
     out.append("")

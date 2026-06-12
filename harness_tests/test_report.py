@@ -107,6 +107,20 @@ class TestRender:
         text = report.render([make_row("model-a", case_id="001", passed=True)])
         assert "## Per-category pass-rate" not in text
 
+    def test_blocked_write_attempts_counted_per_model(self):
+        rows = [
+            make_row("model-a", attempt=1, passed=True) | {"blocked_paths": "tests/test_x.py"},
+            make_row("model-a", attempt=2, passed=True),
+        ]
+        text = report.render(rows)
+        assert "blocked writes" in text
+        summary_line = next(
+            line for line in text.splitlines()
+            if line.startswith("| `model-a`") and "GB" not in line
+        )
+        # ... | parse errs | timeouts | blocked writes | ...
+        assert "| 0 | 0 | 1 |" in summary_line
+
     def test_bench_version_shown_and_mixed_versions_flagged(self):
         v2 = make_row("model-a", passed=True) | {"bench_version": "2"}
         v3 = make_row("model-a", attempt=2, passed=True) | {"bench_version": "3"}
