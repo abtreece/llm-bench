@@ -1,0 +1,21 @@
+txn_id,merchant,status,currency,amount
+t001,Acme,completed,USD,120.00
+t002,Acme,completed,USD,80.50
+t003,Globex,completed,USD,200.25
+t004,Globex,refunded,USD,50.00
+t005,Initech,failed,USD,
+t006,Initech,completed,USD,99.99
+t007,Umbrella,completed,EUR,300.00
+t008,Umbrella,completed,EUR,150.75
+t009,Stark,refunded,EUR,75.00
+t010,Stark,completed,EUR,
+t011,Wayne,completed,JPY,5000
+t012,Wayne,completed,JPY,1200
+t013,Acme,failed,USD,
+t014,Acme,completed,USD,49.50
+t015,Globex,completed,EUR,89.10
+t016,Hooli,completed,USD,200.25
+t017,Hooli,refunded,USD,10.00
+t018,Pied Piper,completed,USD,0.99
+t019,Pied Piper,completed,USD,
+t020,Soylent,failed,EUR,

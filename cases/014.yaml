@@ -1,0 +1,64 @@
+id: '014'
+title: average_order_value counts missing amounts as zero
+difficulty: subtle
+category: data-analysis
+grading: pytest
+target_file: app/analysis.py
+prompt: |-
+  The test in tests/test_014_average_order_value.py is failing. Read the failing test, identify the function in app/analysis.py responsible, and produce a corrected app/analysis.py. Do not modify the test.
+breaking_patch: |
+  --- a/app/analysis.py
+  +++ b/app/analysis.py
+  @@ -106,9 +106,9 @@
+       and the count. Returns None when no transaction qualifies.
+       """
+       amounts = [
+  -        t.amount
+  +        t.amount if t.amount is not None else Decimal("0")
+           for t in txns
+  -        if t.status == "completed" and t.currency == currency and t.amount is not None
+  +        if t.status == "completed" and t.currency == currency
+       ]
+       if not amounts:
+           return None
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_014_average_order_value.py
+  @@ -0,0 +1,22 @@
+  +from decimal import Decimal
+  +from app.analysis import Transaction, average_order_value
+  +from app.money import Money
+  +
+  +
+  +def _t(txn_id, merchant, status, currency, amount):
+  +    return Transaction(txn_id, merchant, status, currency,
+  +                       Decimal(amount) if amount is not None else None)
+  +
+  +
+  +def test_average_with_unsettled_transaction():
+  +    txns = [
+  +        _t("t1", "Acme", "completed", "USD", "10.00"),
+  +        _t("t2", "Acme", "completed", "USD", "20.00"),
+  +        _t("t3", "Acme", "completed", "USD", None),
+  +    ]
+  +    assert average_order_value(txns, "USD") == Money(Decimal("15.00"), "USD")
+  +
+  +
+  +def test_average_all_unsettled_returns_none():
+  +    txns = [_t("t1", "Acme", "completed", "USD", None)]
+  +    assert average_order_value(txns, "USD") is None
+reference_patch: |
+  --- a/app/analysis.py
+  +++ b/app/analysis.py
+  @@ -106,9 +106,9 @@
+       and the count. Returns None when no transaction qualifies.
+       """
+       amounts = [
+  -        t.amount if t.amount is not None else Decimal("0")
+  +        t.amount
+           for t in txns
+  -        if t.status == "completed" and t.currency == currency
+  +        if t.status == "completed" and t.currency == currency and t.amount is not None
+       ]
+       if not amounts:
+           return None

@@ -52,8 +52,13 @@ class TestClassifyStatus:
 class TestLoadCases:
     def test_loads_full_corpus(self):
         cases = run.load_cases(None)
-        assert len(cases) == 12
-        assert [c.id for c in cases] == [f"{i:03d}" for i in range(1, 13)]
+        assert len(cases) == 15
+        assert [c.id for c in cases] == [f"{i:03d}" for i in range(1, 16)]
+
+    def test_data_analysis_cases_target_analysis_module(self):
+        for case in run.load_cases(["013", "014", "015"]):
+            assert case.category == "data-analysis"
+            assert case.target_file == "app/analysis.py"
 
     def test_adversarial_case_has_no_patches(self):
         (case,) = run.load_cases(["012"])

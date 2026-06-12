@@ -1,0 +1,60 @@
+id: '013'
+title: revenue_by_currency counts refunded transactions as revenue
+difficulty: moderate
+category: data-analysis
+grading: pytest
+target_file: app/analysis.py
+prompt: |-
+  The revenue_by_currency function in app/analysis.py is producing wrong totals for some transaction sets. The test in tests/test_013_revenue_status_filter.py is failing. Read the failing test and produce a corrected app/analysis.py. Do not modify the test.
+breaking_patch: |
+  --- a/app/analysis.py
+  +++ b/app/analysis.py
+  @@ -92,7 +92,7 @@
+       """
+       totals: dict[str, Money] = {}
+       for t in txns:
+  -        if t.status != "completed" or t.amount is None:
+  +        if t.status == "failed" or t.amount is None:
+               continue
+           m = round_to_minor_units(Money(t.amount, t.currency))
+           totals[t.currency] = add(totals[t.currency], m) if t.currency in totals else m
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_013_revenue_status_filter.py
+  @@ -0,0 +1,24 @@
+  +from decimal import Decimal
+  +from app.analysis import Transaction, revenue_by_currency
+  +from app.money import Money
+  +
+  +
+  +def _t(txn_id, merchant, status, currency, amount):
+  +    return Transaction(txn_id, merchant, status, currency,
+  +                       Decimal(amount) if amount is not None else None)
+  +
+  +
+  +def test_revenue_excludes_refunded_transactions():
+  +    txns = [
+  +        _t("t1", "Acme", "completed", "USD", "100.00"),
+  +        _t("t2", "Acme", "refunded", "USD", "40.00"),
+  +    ]
+  +    assert revenue_by_currency(txns) == {"USD": Money(Decimal("100.00"), "USD")}
+  +
+  +
+  +def test_revenue_excludes_failed_transactions_with_amounts():
+  +    txns = [
+  +        _t("t1", "Acme", "completed", "EUR", "10.00"),
+  +        _t("t2", "Acme", "failed", "EUR", "99.00"),
+  +    ]
+  +    assert revenue_by_currency(txns) == {"EUR": Money(Decimal("10.00"), "EUR")}
+reference_patch: |
+  --- a/app/analysis.py
+  +++ b/app/analysis.py
+  @@ -92,7 +92,7 @@
+       """
+       totals: dict[str, Money] = {}
+       for t in txns:
+  -        if t.status == "failed" or t.amount is None:
+  +        if t.status != "completed" or t.amount is None:
+               continue
+           m = round_to_minor_units(Money(t.amount, t.currency))
+           totals[t.currency] = add(totals[t.currency], m) if t.currency in totals else m
