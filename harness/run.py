@@ -164,16 +164,27 @@ def parse_test_path_from_patch(test_patch: str) -> str:
     raise ValueError("could not find +++ b/<path> in test_patch")
 
 
-def diff_line_count(a: str, b: str) -> int:
-    """Count of changed lines (added+removed) in a unified diff a→b."""
-    diff = difflib.unified_diff(a.splitlines(), b.splitlines(), lineterm="")
+def _count_diff_body_lines(lines) -> int:
+    """Count added+removed lines in unified-diff output, excluding headers."""
     n = 0
-    for line in diff:
-        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+    for line in lines:
+        if line.startswith(("+++", "---", "@@")):
             continue
-        if line.startswith("+") or line.startswith("-"):
+        if line.startswith(("+", "-")):
             n += 1
     return n
+
+
+def diff_line_count(a: str, b: str) -> int:
+    """Count of changed lines (added+removed) in a unified diff a→b."""
+    return _count_diff_body_lines(
+        difflib.unified_diff(a.splitlines(), b.splitlines(), lineterm="")
+    )
+
+
+def patch_diff_line_count(patch: str) -> int:
+    """Count +/- body lines in an existing unified diff."""
+    return _count_diff_body_lines(patch.splitlines())
 
 
 def setup_worktree(dest: Path) -> None:
@@ -374,17 +385,6 @@ def run_one(
     return row
 
 
-def patch_diff_line_count(patch: str) -> int:
-    """Count +/- body lines in a unified diff, excluding file headers."""
-    n = 0
-    for line in patch.splitlines():
-        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
-            continue
-        if line.startswith("+") or line.startswith("-"):
-            n += 1
-    return n
-
-
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Run llm-bench against local Ollama.")
     p.add_argument("--models", nargs="*", help="restrict to these model tags")
@@ -403,6 +403,10 @@ def main(argv: list[str] | None = None) -> int:
     run_id = args.run_id or _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     models = load_models(args.models)
     cases = load_cases(args.cases)
+
+    # Crashed runs can leave stale worktree metadata behind (remove_worktree
+    # is best-effort); clean it up before adding new ones.
+    subprocess.run(["git", "worktree", "prune"], cwd=REPO, capture_output=True)
 
     RESULTS_DIR.mkdir(exist_ok=True)
     csv_path = RESULTS_DIR / f"{run_id}.csv"
