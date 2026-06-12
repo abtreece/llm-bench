@@ -16,6 +16,10 @@ class TestModelsFromTags:
         assert ollama_client.models_from_tags({}) == []
         assert ollama_client.models_from_tags({"models": []}) == []
 
+    def test_null_models_key(self):
+        # Go marshals a nil slice as null, so {"models": null} is realistic.
+        assert ollama_client.models_from_tags({"models": None}) == []
+
 
 class TestCatalog:
     def test_repo_catalog_loads_and_is_well_formed(self):
@@ -331,3 +335,19 @@ class TestMain:
         assert rc == 0
         assert "Ollama not reachable" in out
         assert "worth pulling" in out
+
+    def test_malformed_tags_json_degrades_like_ollama_down(self, monkeypatch, capsys):
+        # requests>=2.27 raises requests.exceptions.JSONDecodeError (a
+        # RequestException subclass) from Response.json(); pin that a
+        # garbage /api/tags body degrades to the note instead of crashing.
+        monkeypatch.setattr(
+            recommend, "probe_hardware",
+            lambda: recommend.Hardware("cuda", [recommend.Gpu("T4", 16.1)],
+                                       64.0, 16.1, []))
+        def garbage(base_url=None):
+            raise recommend.requests.exceptions.JSONDecodeError("bad", "<html>", 0)
+        monkeypatch.setattr(recommend.ollama_client, "list_local_models", garbage)
+        rc = recommend.main([])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "Ollama not reachable" in out

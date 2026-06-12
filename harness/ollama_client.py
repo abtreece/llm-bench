@@ -97,9 +97,10 @@ def models_from_tags(data: dict) -> list[dict]:
     Ollama reports size in bytes; GB = bytes / 1e9 to match the registry's
     decimal-GB convention used in models.yaml and catalog.yaml.
     """
+    # `or []`: Ollama's Go server marshals a nil slice as {"models": null}.
     return [
         {"name": m["name"], "size_gb": int(m.get("size", 0)) / 1e9}
-        for m in data.get("models", [])
+        for m in data.get("models") or []
     ]
 
 
