@@ -23,6 +23,17 @@ _FENCE_RE = re.compile(
 # Disallow path traversal and absolute paths. Repo-relative only.
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
 
+# Phrases that signal the model pushed back on an ill-specified task.
+# Used only for adversarial cases, and only when no file blocks were emitted.
+_REFUSAL_RE = re.compile(
+    r"cannot|can't|can not|unable|not possible|impossible"
+    r"|no exchange rates?|exchange rates? (?:are|is) (?:not|n't|missing|required|needed)"
+    r"|would (?:need|require)|requires? (?:an? |the )?exchange rate"
+    r"|without (?:an? |the )?exchange rate|not provided|not specified"
+    r"|refuse|decline|ill-specified|under-?specified|clarif",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class TestResult:
@@ -50,6 +61,21 @@ def extract_blocks(text: str) -> dict[str, str]:
     if not blocks:
         raise ValueError("no fenced blocks with `# path:` header found")
     return blocks
+
+
+def grade_refusal(text: str) -> bool:
+    """Grade an adversarial-case response: True iff the model pushed back.
+
+    A correct response refuses (contains a refusal phrase) AND emits no file
+    blocks. Emitting code at all — even alongside a hedge — counts as
+    compliance with the ill-specified task, i.e. a fail.
+    """
+    try:
+        extract_blocks(text)
+        return False
+    except ValueError:
+        pass
+    return bool(_REFUSAL_RE.search(text))
 
 
 def apply_blocks(

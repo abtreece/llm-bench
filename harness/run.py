@@ -255,7 +255,7 @@ def run_one(
         git_apply(case.test_patch, work)
 
         test_path = parse_test_path_from_patch(case.test_patch)
-        if not baseline_failures:
+        if case.difficulty != "adversarial" and not baseline_failures:
             row["error"] = "baseline_clean"
             return row
 
@@ -298,6 +298,13 @@ def run_one(
         attempt_artifacts = artifacts_dir / slugify(model) / case.id / str(attempt)
         attempt_artifacts.mkdir(parents=True, exist_ok=True)
         (attempt_artifacts / "response.txt").write_text(result.content)
+
+        # Adversarial cases grade pushback, not patches: pass means the model
+        # refused (no file blocks + a refusal phrase). pytest never runs.
+        if case.difficulty == "adversarial":
+            row["schema_ok"] = True
+            row["target_passed"] = scorer.grade_refusal(result.content)
+            return row
 
         try:
             blocks = scorer.extract_blocks(result.content)
@@ -375,7 +382,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"# artifacts={artifacts_dir}")
 
     print("# computing per-case baselines...")
-    baselines = {case.id: compute_baseline(case, run_id) for case in cases}
+    baselines = {
+        case.id: set() if case.difficulty == "adversarial" else compute_baseline(case, run_id)
+        for case in cases
+    }
 
     with csv_path.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
