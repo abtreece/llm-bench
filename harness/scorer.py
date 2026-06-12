@@ -47,16 +47,16 @@ def extract_blocks(text: str) -> dict[str, str]:
     """Parse all fenced blocks with a `path:` header.
 
     Returns mapping of relpath -> file body. Raises ValueError if the text
-    contains no parseable block, if a path is unsafe, or if the same path
-    appears twice (ambiguous edit).
+    contains no parseable block or if a path is unsafe. If the same path
+    appears more than once (small models often restate the file), the last
+    occurrence wins — the benchmark measures coding ability, not repetition
+    quirks.
     """
     blocks: dict[str, str] = {}
     for m in _FENCE_RE.finditer(text):
         path = m.group("path").strip()
         if not _SAFE_PATH_RE.match(path) or path.startswith("/") or ".." in path.split("/"):
             raise ValueError(f"unsafe path in block: {path!r}")
-        if path in blocks:
-            raise ValueError(f"duplicate path in response: {path!r}")
         blocks[path] = m.group("body")
     if not blocks:
         raise ValueError("no fenced blocks with `# path:` header found")
