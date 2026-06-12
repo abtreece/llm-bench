@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -108,3 +108,83 @@ def scan_lspci(text: str) -> str | None:
         if "AMD" in line or "ATI" in line:
             return "amd"
     return None
+
+
+# Metal's default wired-memory limit gives the GPU roughly two-thirds of
+# physical RAM on Apple Silicon; --headroom-gb is the escape hatch.
+APPLE_UNIFIED_FRACTION = 0.67
+# RAM kept back for the OS and Ollama runtime on CPU-only hosts.
+CPU_OS_RESERVE_GB = 4.0
+
+
+class RecommendError(Exception):
+    """Nothing to fit against (unsupported OS, no GPU and no readable RAM)."""
+
+
+@dataclass(frozen=True)
+class Hardware:
+    backend: str            # "cuda" | "rocm" | "metal" | "cpu"
+    gpus: list[Gpu]
+    ram_gb: float | None
+    budget_gb: float
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_hardware(
+    system: str,
+    machine: str,
+    *,
+    nvidia_out: str | None,
+    rocm_out: str | None,
+    lspci_out: str | None,
+    ram_gb: float | None,
+) -> Hardware:
+    """Decide backend and memory budget from raw probe output.
+
+    Pure: probe_hardware() gathers the raw text, this makes every decision.
+    """
+    warnings: list[str] = []
+
+    if system == "Darwin":
+        if ram_gb is None:
+            raise RecommendError("could not read RAM size via sysctl")
+        if machine == "arm64":
+            return Hardware("metal", [], ram_gb,
+                            APPLE_UNIFIED_FRACTION * ram_gb, warnings)
+        warnings.append(
+            "Intel Mac: Ollama does not accelerate Intel GPUs; using CPU budget.")
+        return Hardware("cpu", [], ram_gb, ram_gb - CPU_OS_RESERVE_GB, warnings)
+
+    if system != "Linux":
+        raise RecommendError(f"unsupported OS: {system}")
+
+    gpus = parse_nvidia_smi(nvidia_out) if nvidia_out is not None else []
+    if gpus:
+        return Hardware("cuda", gpus, ram_gb,
+                        sum(g.vram_gb for g in gpus), warnings)
+
+    gpus = parse_rocm_smi(rocm_out) if rocm_out is not None else []
+    if gpus:
+        return Hardware("rocm", gpus, ram_gb,
+                        sum(g.vram_gb for g in gpus), warnings)
+
+    if lspci_out is None:
+        warnings.append(
+            "GPU detection incomplete: lspci not available (pciutils); "
+            "assuming CPU-only.")
+    else:
+        vendor = scan_lspci(lspci_out)
+        if vendor == "nvidia":
+            warnings.append(
+                "lspci shows an NVIDIA GPU but nvidia-smi is missing or "
+                "unusable — install the NVIDIA driver to use it. "
+                "Falling back to CPU budget.")
+        elif vendor == "amd":
+            warnings.append(
+                "lspci shows an AMD GPU but rocm-smi is missing or "
+                "unusable — install ROCm to use it. "
+                "Falling back to CPU budget.")
+
+    if ram_gb is None:
+        raise RecommendError("no usable GPU and could not read RAM size")
+    return Hardware("cpu", [], ram_gb, ram_gb - CPU_OS_RESERVE_GB, warnings)

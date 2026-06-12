@@ -1,4 +1,6 @@
 """Tests for harness/recommend.py — pure-function core, no subprocess/network."""
+import pytest
+
 from harness import ollama_client, recommend
 
 
@@ -84,3 +86,80 @@ class TestParsers:
 
         def test_empty(self):
             assert recommend.scan_lspci("") is None
+
+
+class TestBuildHardware:
+    def test_darwin_arm64_is_metal_unified_fraction(self):
+        hw = recommend.build_hardware(
+            "Darwin", "arm64", nvidia_out=None, rocm_out=None,
+            lspci_out=None, ram_gb=64.0)
+        assert hw.backend == "metal"
+        assert hw.gpus == []
+        assert abs(hw.budget_gb - 0.67 * 64.0) < 0.01
+
+    def test_darwin_x86_is_cpu(self):
+        hw = recommend.build_hardware(
+            "Darwin", "x86_64", nvidia_out=None, rocm_out=None,
+            lspci_out=None, ram_gb=32.0)
+        assert hw.backend == "cpu"
+        assert hw.budget_gb == 32.0 - 4.0
+
+    def test_linux_nvidia(self):
+        hw = recommend.build_hardware(
+            "Linux", "x86_64", nvidia_out=NVIDIA_ONE, rocm_out=None,
+            lspci_out=None, ram_gb=64.0)
+        assert hw.backend == "cuda"
+        assert abs(hw.budget_gb - 16.1) < 0.1
+
+    def test_linux_nvidia_multi_gpu_sums(self):
+        hw = recommend.build_hardware(
+            "Linux", "x86_64", nvidia_out=NVIDIA_TWO, rocm_out=None,
+            lspci_out=None, ram_gb=64.0)
+        assert abs(hw.budget_gb - 32.2) < 0.2
+
+    def test_linux_rocm(self):
+        hw = recommend.build_hardware(
+            "Linux", "x86_64", nvidia_out=None, rocm_out=ROCM_JSON,
+            lspci_out=None, ram_gb=64.0)
+        assert hw.backend == "rocm"
+        assert abs(hw.budget_gb - 17.2) < 0.1
+
+    def test_linux_nvidia_smi_garbage_falls_through(self):
+        # nvidia-smi present but emitting garbage = driver gap, not cuda.
+        hw = recommend.build_hardware(
+            "Linux", "x86_64", nvidia_out="NVIDIA-SMI has failed\n",
+            rocm_out=None, lspci_out=LSPCI_NVIDIA, ram_gb=64.0)
+        assert hw.backend == "cpu"
+        assert any("NVIDIA" in w for w in hw.warnings)
+
+    def test_linux_driver_gap_warns_and_uses_cpu(self):
+        hw = recommend.build_hardware(
+            "Linux", "x86_64", nvidia_out=None, rocm_out=None,
+            lspci_out=LSPCI_NVIDIA, ram_gb=64.0)
+        assert hw.backend == "cpu"
+        assert hw.budget_gb == 60.0
+        assert any("NVIDIA" in w for w in hw.warnings)
+
+    def test_linux_amd_driver_gap_warns(self):
+        hw = recommend.build_hardware(
+            "Linux", "x86_64", nvidia_out=None, rocm_out=None,
+            lspci_out=LSPCI_AMD, ram_gb=64.0)
+        assert hw.backend == "cpu"
+        assert any("ROCm" in w for w in hw.warnings)
+
+    def test_linux_no_lspci_notes_incomplete_detection(self):
+        hw = recommend.build_hardware(
+            "Linux", "x86_64", nvidia_out=None, rocm_out=None,
+            lspci_out=None, ram_gb=64.0)
+        assert hw.backend == "cpu"
+        assert any("lspci" in w for w in hw.warnings)
+
+    def test_unsupported_os_raises(self):
+        with pytest.raises(recommend.RecommendError):
+            recommend.build_hardware("Windows", "AMD64", nvidia_out=None,
+                                     rocm_out=None, lspci_out=None, ram_gb=8.0)
+
+    def test_no_gpu_and_no_ram_raises(self):
+        with pytest.raises(recommend.RecommendError):
+            recommend.build_hardware("Linux", "x86_64", nvidia_out=None,
+                                     rocm_out=None, lspci_out="", ram_gb=None)
