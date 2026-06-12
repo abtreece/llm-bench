@@ -23,6 +23,17 @@ _FENCE_RE = re.compile(
 # Disallow path traversal and absolute paths. Repo-relative only.
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
 
+# Phrases that signal the model pushed back on an ill-specified task.
+# Used only for adversarial cases, and only when no file blocks were emitted.
+_REFUSAL_RE = re.compile(
+    r"cannot|can't|can not|unable|not possible|impossible"
+    r"|no exchange rates?|exchange rates? (?:are|is) (?:not|n't|missing|required|needed)"
+    r"|would (?:need|require)|requires? (?:an? |the )?exchange rate"
+    r"|without (?:an? |the )?exchange rate|not provided|not specified"
+    r"|refuse|decline|ill-specified|under-?specified|clarif",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class TestResult:
@@ -36,20 +47,33 @@ def extract_blocks(text: str) -> dict[str, str]:
     """Parse all fenced blocks with a `path:` header.
 
     Returns mapping of relpath -> file body. Raises ValueError if the text
-    contains no parseable block, if a path is unsafe, or if the same path
-    appears twice (ambiguous edit).
+    contains no parseable block or if a path is unsafe. If the same path
+    appears more than once (small models often restate the file), the last
+    occurrence wins — the benchmark measures coding ability, not repetition
+    quirks.
     """
     blocks: dict[str, str] = {}
     for m in _FENCE_RE.finditer(text):
         path = m.group("path").strip()
         if not _SAFE_PATH_RE.match(path) or path.startswith("/") or ".." in path.split("/"):
             raise ValueError(f"unsafe path in block: {path!r}")
-        if path in blocks:
-            raise ValueError(f"duplicate path in response: {path!r}")
         blocks[path] = m.group("body")
     if not blocks:
         raise ValueError("no fenced blocks with `# path:` header found")
     return blocks
+
+
+def grade_refusal(text: str) -> bool:
+    """Grade an adversarial-case response: True iff the model pushed back.
+
+    A correct response refuses (contains a refusal phrase) AND emits no
+    fenced code at all — not just no *parseable* blocks. A fence without a
+    `# path:` header or with an unsafe path is still emitted code, i.e.
+    compliance with the ill-specified task, i.e. a fail.
+    """
+    if "```" in text:
+        return False
+    return bool(_REFUSAL_RE.search(text))
 
 
 def apply_blocks(

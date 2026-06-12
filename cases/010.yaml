@@ -2,7 +2,6 @@ id: '010'
 title: round_to_minor_units default rounding mode is wrong
 difficulty: subtle
 target_file: app/money.py
-test_command: pytest tests/test_010_default_rounding_mode.py -x
 prompt: |-
   The test in tests/test_010_default_rounding_mode.py is failing. Read the failing test, identify which function in app/money.py is rounding incorrectly on .5 boundaries, and produce a corrected app/money.py. Do not modify the test.
 breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -85,7 +85,7 @@\n     return\

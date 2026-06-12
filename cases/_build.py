@@ -96,7 +96,6 @@ def _yaml_for(case: Case, clean_money: str) -> dict:
         "title": case.title,
         "difficulty": case.difficulty,
         "target_file": MONEY_REL,
-        "test_command": f"pytest {case.test_filename} -x",
         "prompt": _Literal(case.prompt),
         "breaking_patch": _Literal(breaking) if breaking else "",
         "test_patch": _Literal(test_patch),

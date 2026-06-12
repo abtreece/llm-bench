@@ -2,7 +2,6 @@ id: 009
 title: compare does not raise on currency mismatch
 difficulty: moderate
 target_file: app/money.py
-test_command: pytest tests/test_009_compare_mismatch.py -x
 prompt: |-
   Comparing two Money values with different currencies should raise a CurrencyMismatchError. The test in tests/test_009_compare_mismatch.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
 breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -131,7 +131,6 @@\n \n\

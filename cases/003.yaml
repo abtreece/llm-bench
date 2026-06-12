@@ -2,7 +2,6 @@ id: '003'
 title: format_amount always uses 2 decimal places
 difficulty: obvious
 target_file: app/money.py
-test_command: pytest tests/test_003_format_amount_decimals.py -x
 prompt: |-
   The format_amount function in app/money.py is producing the wrong number of decimal places for some currencies. The test in tests/test_003_format_amount_decimals.py is failing. Read the failing test and the CURRENCIES table, then produce a corrected app/money.py. Do not modify the test.
 breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -210,10 +210,7 @@\n  \

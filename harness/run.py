@@ -86,6 +86,7 @@ CSV_FIELDS = [
     "reference_diff_lines",
     "model_diff_lines",
     "blocked_paths",
+    "done_reason",
     "error",
 ]
 
@@ -96,7 +97,6 @@ class Case:
     title: str
     difficulty: str
     target_file: str
-    test_command: str
     prompt: str
     breaking_patch: str
     test_patch: str
@@ -125,7 +125,6 @@ def load_cases(only: list[str] | None) -> list[Case]:
                 title=d["title"],
                 difficulty=d["difficulty"],
                 target_file=d["target_file"],
-                test_command=d["test_command"],
                 prompt=d["prompt"],
                 breaking_patch=d["breaking_patch"],
                 test_patch=d["test_patch"],
@@ -165,16 +164,27 @@ def parse_test_path_from_patch(test_patch: str) -> str:
     raise ValueError("could not find +++ b/<path> in test_patch")
 
 
-def diff_line_count(a: str, b: str) -> int:
-    """Count of changed lines (added+removed) in a unified diff a→b."""
-    diff = difflib.unified_diff(a.splitlines(), b.splitlines(), lineterm="")
+def _count_diff_body_lines(lines) -> int:
+    """Count added+removed lines in unified-diff output, excluding headers."""
     n = 0
-    for line in diff:
-        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+    for line in lines:
+        if line.startswith(("+++", "---", "@@")):
             continue
-        if line.startswith("+") or line.startswith("-"):
+        if line.startswith(("+", "-")):
             n += 1
     return n
+
+
+def diff_line_count(a: str, b: str) -> int:
+    """Count of changed lines (added+removed) in a unified diff a→b."""
+    return _count_diff_body_lines(
+        difflib.unified_diff(a.splitlines(), b.splitlines(), lineterm="")
+    )
+
+
+def patch_diff_line_count(patch: str) -> int:
+    """Count +/- body lines in an existing unified diff."""
+    return _count_diff_body_lines(patch.splitlines())
 
 
 def setup_worktree(dest: Path) -> None:
@@ -203,7 +213,24 @@ def status_line(model: str, case_id: str, attempt: int, status: str, ms: int) ->
     return f"[{model:>22}] case {case_id} attempt {attempt} → {status} ({ms} ms)"
 
 
-def compute_baseline(case: Case, run_id: str) -> set[str]:
+def classify_status(row: dict) -> str:
+    err = row["error"]
+    if err.startswith("timeout"):
+        return "TIMEOUT"
+    if err.startswith("infra_error"):
+        return "INFRA"
+    if err.startswith("truncated"):
+        return "TRUNC"
+    if err.startswith("parse_error"):
+        return "PARSE_ERR"
+    if row["target_passed"] and row["regressions"] == 0:
+        return "PASS"
+    if row["target_passed"]:
+        return "REGRESS"
+    return "FAIL"
+
+
+def compute_baseline(case: Case, run_id: str, test_timeout_s: int) -> set[str]:
     """Full-suite failures in the broken+test state. Model/attempt independent,
     so computed once per case instead of once per row."""
     work = WORKTREE_ROOT / run_id / f"baseline-{case.id}"
@@ -212,7 +239,11 @@ def compute_baseline(case: Case, run_id: str) -> set[str]:
         if case.breaking_patch:
             git_apply(case.breaking_patch, work)
         git_apply(case.test_patch, work)
-        return scorer.collect_baseline_failures(work, PYTEST_BIN)
+        # Same budget as the scoring runs' full-suite pass (2x the target
+        # test timeout) so a slow suite can't silently empty the baseline.
+        return scorer.collect_baseline_failures(
+            work, PYTEST_BIN, timeout_s=test_timeout_s * 2
+        )
     finally:
         remove_worktree(work)
 
@@ -246,6 +277,7 @@ def run_one(
         reference_diff_lines=0,
         model_diff_lines=0,
         blocked_paths="",
+        done_reason="",
         error="",
     )
     try:
@@ -255,7 +287,7 @@ def run_one(
         git_apply(case.test_patch, work)
 
         test_path = parse_test_path_from_patch(case.test_patch)
-        if not baseline_failures:
+        if case.difficulty != "adversarial" and not baseline_failures:
             row["error"] = "baseline_clean"
             return row
 
@@ -285,6 +317,12 @@ def run_one(
                 model, SYSTEM_PROMPT, user_msg,
                 timeout_s=timeout_s, temperature=temperature, seed=seed,
             )
+        except ollama_client.ChatTimeout as e:
+            # Scored as a model failure: on fixed hardware, "too slow to
+            # answer" is a property of the model, not the infrastructure.
+            row["error"] = f"timeout:{e}"
+            row["latency_ms"] = int((time.monotonic() - t0) * 1000)
+            return row
         except Exception as e:
             row["error"] = f"infra_error:{type(e).__name__}:{e}"
             row["latency_ms"] = int((time.monotonic() - t0) * 1000)
@@ -294,15 +332,28 @@ def run_one(
         row["load_ms"] = result.load_duration_ns // 1_000_000
         row["prompt_tokens"] = result.prompt_eval_count
         row["completion_tokens"] = result.eval_count
+        row["done_reason"] = result.done_reason
 
         attempt_artifacts = artifacts_dir / slugify(model) / case.id / str(attempt)
         attempt_artifacts.mkdir(parents=True, exist_ok=True)
         (attempt_artifacts / "response.txt").write_text(result.content)
 
+        # Adversarial cases grade pushback, not patches: pass means the model
+        # refused (no file blocks + a refusal phrase). pytest never runs.
+        if case.difficulty == "adversarial":
+            row["schema_ok"] = True
+            row["target_passed"] = scorer.grade_refusal(result.content)
+            return row
+
         try:
             blocks = scorer.extract_blocks(result.content)
         except ValueError as e:
-            row["error"] = f"parse_error:{e}"
+            if result.done_reason == "length":
+                # Generation hit the token limit mid-file — a config/capacity
+                # issue, not evidence the model can't follow the format.
+                row["error"] = f"truncated:{e}"
+            else:
+                row["error"] = f"parse_error:{e}"
             return row
 
         row["schema_ok"] = True
@@ -334,17 +385,6 @@ def run_one(
     return row
 
 
-def patch_diff_line_count(patch: str) -> int:
-    """Count +/- body lines in a unified diff, excluding file headers."""
-    n = 0
-    for line in patch.splitlines():
-        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
-            continue
-        if line.startswith("+") or line.startswith("-"):
-            n += 1
-    return n
-
-
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Run llm-bench against local Ollama.")
     p.add_argument("--models", nargs="*", help="restrict to these model tags")
@@ -364,6 +404,10 @@ def main(argv: list[str] | None = None) -> int:
     models = load_models(args.models)
     cases = load_cases(args.cases)
 
+    # Crashed runs can leave stale worktree metadata behind (remove_worktree
+    # is best-effort); clean it up before adding new ones.
+    subprocess.run(["git", "worktree", "prune"], cwd=REPO, capture_output=True)
+
     RESULTS_DIR.mkdir(exist_ok=True)
     csv_path = RESULTS_DIR / f"{run_id}.csv"
     artifacts_dir = RESULTS_DIR / run_id
@@ -375,7 +419,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"# artifacts={artifacts_dir}")
 
     print("# computing per-case baselines...")
-    baselines = {case.id: compute_baseline(case, run_id) for case in cases}
+    baselines = {
+        case.id: set() if case.difficulty == "adversarial"
+        else compute_baseline(case, run_id, args.test_timeout)
+        for case in cases
+    }
 
     with csv_path.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
@@ -385,6 +433,15 @@ def main(argv: list[str] | None = None) -> int:
                 ollama_client.warm_up(model, timeout_s=args.timeout)
             except Exception as e:
                 print(f"[{model:>22}] warm-up failed: {e} — skipping model")
+                # Leave a trace in the CSV so the report can show the model
+                # was skipped instead of silently omitting it.
+                skip_row = {f: "" for f in CSV_FIELDS}
+                skip_row.update(
+                    run_id=run_id, model=model, case_id="*", attempt=0,
+                    error=f"infra_error:warmup_failed:{type(e).__name__}:{e}",
+                )
+                w.writerow(skip_row)
+                fh.flush()
                 continue
             for case in cases:
                 for attempt in range(1, args.attempts + 1):
@@ -394,13 +451,9 @@ def main(argv: list[str] | None = None) -> int:
                         timeout_s=args.timeout,
                         test_timeout_s=args.test_timeout,
                     )
-                    w.writerow(row); fh.flush()
-                    status = (
-                        "PASS" if row["target_passed"] and row["regressions"] == 0
-                        else ("REGRESS" if row["target_passed"] else
-                              ("PARSE_ERR" if not row["schema_ok"] and row["error"].startswith("parse_error")
-                               else ("INFRA" if row["error"].startswith("infra_error") else "FAIL")))
-                    )
+                    w.writerow(row)
+                    fh.flush()
+                    status = classify_status(row)
                     print(status_line(model, case.id, attempt, status, row["latency_ms"]))
     print(f"done. csv -> {csv_path}")
     return 0

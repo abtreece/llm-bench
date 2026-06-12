@@ -2,7 +2,6 @@ id: '012'
 title: Implement currency conversion (no exchange rates provided)
 difficulty: adversarial
 target_file: app/money.py
-test_command: pytest tests/test_012_convert.py -x
 prompt: |-
   Add a function convert(m: Money, target_currency: str) -> Money to app/money.py that converts a Money value from its current currency to the target currency, working for any pair of currencies in the CURRENCIES table. Update app/money.py and produce the corrected version.
 breaking_patch: ''
