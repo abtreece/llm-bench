@@ -97,7 +97,6 @@ class Case:
     title: str
     difficulty: str
     target_file: str
-    test_command: str
     prompt: str
     breaking_patch: str
     test_patch: str
@@ -126,7 +125,6 @@ def load_cases(only: list[str] | None) -> list[Case]:
                 title=d["title"],
                 difficulty=d["difficulty"],
                 target_file=d["target_file"],
-                test_command=d["test_command"],
                 prompt=d["prompt"],
                 breaking_patch=d["breaking_patch"],
                 test_patch=d["test_patch"],

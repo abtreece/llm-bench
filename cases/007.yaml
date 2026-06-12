@@ -2,7 +2,6 @@ id: '007'
 title: parse_money_str accepts only the prefix form (USD 1.23)
 difficulty: moderate
 target_file: app/money.py
-test_command: pytest tests/test_007_parse_money_str_suffix.py -x
 prompt: |-
   The parse_money_str function in app/money.py should accept both the prefix form ("USD 1.23") and the suffix form ("1.23 USD"). The test in tests/test_007_parse_money_str_suffix.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
 breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -185,7 +185,7 @@\n   \

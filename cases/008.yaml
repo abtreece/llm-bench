@@ -2,7 +2,6 @@ id: 008
 title: allocate distributes the remainder right-to-left instead of left-to-right
 difficulty: moderate
 target_file: app/money.py
-test_command: pytest tests/test_008_allocate_remainder_order.py -x
 prompt: |-
   When allocate(m, ratios) splits a Money value and there is a remainder, the remainder should be distributed one minor unit at a time to the earlier buckets (left-to-right). The test in tests/test_008_allocate_remainder_order.py is failing. Read the failing test and produce a corrected app/money.py. Do not modify the test.
 breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -157,7 +157,7 @@\n   \
