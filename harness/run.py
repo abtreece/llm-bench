@@ -221,7 +221,7 @@ def classify_status(row: dict) -> str:
     return "FAIL"
 
 
-def compute_baseline(case: Case, run_id: str) -> set[str]:
+def compute_baseline(case: Case, run_id: str, test_timeout_s: int) -> set[str]:
     """Full-suite failures in the broken+test state. Model/attempt independent,
     so computed once per case instead of once per row."""
     work = WORKTREE_ROOT / run_id / f"baseline-{case.id}"
@@ -230,7 +230,11 @@ def compute_baseline(case: Case, run_id: str) -> set[str]:
         if case.breaking_patch:
             git_apply(case.breaking_patch, work)
         git_apply(case.test_patch, work)
-        return scorer.collect_baseline_failures(work, PYTEST_BIN)
+        # Same budget as the scoring runs' full-suite pass (2x the target
+        # test timeout) so a slow suite can't silently empty the baseline.
+        return scorer.collect_baseline_failures(
+            work, PYTEST_BIN, timeout_s=test_timeout_s * 2
+        )
     finally:
         remove_worktree(work)
 
@@ -414,7 +418,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print("# computing per-case baselines...")
     baselines = {
-        case.id: set() if case.difficulty == "adversarial" else compute_baseline(case, run_id)
+        case.id: set() if case.difficulty == "adversarial"
+        else compute_baseline(case, run_id, args.test_timeout)
         for case in cases
     }
 
