@@ -365,6 +365,8 @@ def run_one(
         attempt_artifacts = artifacts_dir / slugify(model) / case.id / str(attempt)
         attempt_artifacts.mkdir(parents=True, exist_ok=True)
         (attempt_artifacts / "response.txt").write_text(result.content)
+        if result.thinking:
+            (attempt_artifacts / "thinking.txt").write_text(result.thinking)
 
         # Refusal-graded cases grade pushback, not patches: pass means the
         # model refused (no file blocks + a refusal phrase). pytest never runs.

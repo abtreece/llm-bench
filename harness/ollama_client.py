@@ -23,6 +23,10 @@ class ChatTimeout(Exception):
 @dataclass(frozen=True)
 class ChatResult:
     content: str
+    # Reasoning emitted by thinking models (deepseek-r1, qwen3). Ollama >= 0.9
+    # routes it to message.thinking, so content stays parseable; empty for
+    # non-thinking models. Thinking tokens are included in eval_count.
+    thinking: str
     prompt_eval_count: int
     eval_count: int
     total_duration_ns: int
@@ -67,10 +71,16 @@ def chat(
     except requests.exceptions.ReadTimeout as e:
         raise ChatTimeout(f"no response from {model} after {timeout_s}s") from e
     r.raise_for_status()
-    data = r.json()
+    return chat_result_from_response(r.json())
+
+
+def chat_result_from_response(data: dict) -> ChatResult:
+    """Pure extraction from an /api/chat payload into a ChatResult."""
     msg = data.get("message") or {}
     return ChatResult(
         content=msg.get("content", ""),
+        # `or ""`: absent for non-thinking models; null-tolerant either way.
+        thinking=msg.get("thinking") or "",
         prompt_eval_count=int(data.get("prompt_eval_count", 0)),
         eval_count=int(data.get("eval_count", 0)),
         total_duration_ns=int(data.get("total_duration", 0)),
