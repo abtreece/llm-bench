@@ -10,8 +10,6 @@ import argparse
 import csv
 import datetime as _dt
 import difflib
-import json
-import shutil
 import subprocess
 import sys
 import time
