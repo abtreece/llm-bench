@@ -6,6 +6,9 @@ catalog:
   - name: qwen2.5-coder:1.5b
     size_gb: 1.0
     notes: floor sanity check
+  - name: nemotron-3-nano:4b
+    size_gb: 2.8
+    notes: non-qwen/deepseek family for cross-family comparison
   - name: qwen2.5-coder:7b
     size_gb: 4.7
   - name: qwen3:8b
@@ -18,5 +21,8 @@ catalog:
     size_gb: 9.3
   - name: qwen3-coder:30b
     size_gb: 19.0
+  - name: glm-4.7-flash:q4_K_M
+    size_gb: 19.0
+    notes: coding-focused 30B-class MoE
   - name: qwen2.5-coder:32b
     size_gb: 20.0

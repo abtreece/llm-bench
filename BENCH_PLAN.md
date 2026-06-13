@@ -48,16 +48,19 @@ original smoke command named `qwen3:4b`, which `load_models` rejected
 because it wasn't in `models.yaml` — the smoke ran with `qwen2.5:3b`
 instead.
 
-**Roster decided** (2026-06-12): qwen2.5 ladder + `qwen3:4b`,
-`deepseek-coder-v2:latest`, `deepseek-r1:14b` — 8 models, all within the
-T4's 16 GiB. `qwen3-coder:30b` deferred (partial CPU offload). Thinking
-models required harness support: Ollama ≥ 0.9 routes reasoning to
-`message.thinking` (verified empirically on javelin's 0.24.0), which the
-client now captures and `run.py` saves as a `thinking.txt` artifact.
-Thinking tokens count toward `completion_tokens`, so tokens/sec reflects
-true generation cost.
+**Roster decided** (2026-06-12): qwen2.5 ladder (base + coder at 7B and
+14B) + `qwen3:4b`, `qwen3:14b`, `nemotron-3-nano:4b`,
+`deepseek-coder-v2:latest`, `deepseek-r1:14b` — 11 models, weights all
+within the T4's VRAM, chosen for paired comparisons (base vs coder,
+thinking vs not, cross-family at 4B). `qwen3-coder:30b` deferred
+(partial CPU offload); GLM/MiniMax/Kimi headliners are cloud-only on
+Ollama or >19 GB. Thinking models required harness support: Ollama ≥ 0.9
+routes reasoning to `message.thinking` (verified empirically on
+javelin's 0.24.0), which the client now captures and `run.py` saves as a
+`thinking.txt` artifact. Thinking tokens count toward
+`completion_tokens`, so tokens/sec reflects true generation cost.
 
-Next: the Phase 6 full run (8 models × 15 cases × 3 attempts = 360
+Next: the Phase 6 full run (11 models × 15 cases × 3 attempts = 495
 invocations), which becomes the v2 baseline.
 
 ---
@@ -416,11 +419,14 @@ Per `ollama list` on 2026-06-12 (Ollama 0.24.0):
 qwen2.5:1.5b                986 MB
 qwen2.5:3b                  1.9 GB
 qwen3:4b                    2.5 GB    (thinking)
+nemotron-3-nano:4b          2.8 GB    (thinking)
 qwen2.5:7b                  4.7 GB
 qwen2.5-coder:7b            4.7 GB
 deepseek-coder-v2:latest    8.9 GB
 qwen2.5:14b                 9.0 GB
+qwen2.5-coder:14b           9.0 GB
 deepseek-r1:14b             9.0 GB    (thinking)
+qwen3:14b                   9.3 GB    (thinking)
 qwen3-coder:30b             18 GB     (not in roster: exceeds T4 VRAM)
 nomic-embed-text:latest     274 MB    (embedding, not benchmarkable)
 ```
