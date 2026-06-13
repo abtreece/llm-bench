@@ -1,7 +1,7 @@
 """Build and verify the case corpus.
 
-Each case is declared in build_cases() with a small textual edit to
-app/money.py (the "bug") and a focused test that catches it. This script
+Each case is declared in build_cases() with a small textual edit to its
+target module (the "bug") and a focused test that catches it. This script
 generates a YAML per case containing breaking_patch, test_patch, and
 reference_patch, then verifies that:
 
@@ -9,8 +9,8 @@ reference_patch, then verifies that:
   - the focused test FAILS on the broken+test-patch state
   - the focused test PASSES once reference_patch is applied
 
-Adversarial cases are dumped without breaking/reference patches and are
-not verified by pytest (they use refusal grading in the harness).
+Refusal-graded cases are dumped without breaking/reference patches and
+are not verified by pytest (the harness grades pushback instead).
 
 Run from the repo root:
 
@@ -31,6 +31,10 @@ import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 MONEY_REL = "app/money.py"
+
+# Keep in sync with harness/run.py (pinned by harness_tests).
+CATEGORIES = frozenset({"coding", "data-analysis"})
+GRADINGS = frozenset({"pytest", "refusal"})
 
 
 class _Literal(str):
@@ -174,6 +178,15 @@ def _verify(case: Case, data: dict) -> None:
 # ---------------------------------------------------------------------------
 # Cases
 # ---------------------------------------------------------------------------
+
+# Shared Transaction-constructor snippet for data-analysis test sources, so
+# a Transaction signature change is a one-place edit.
+_TXN_HELPER = (
+    "def _t(txn_id, merchant, status, currency, amount):\n"
+    "    return Transaction(txn_id, merchant, status, currency,\n"
+    "                       Decimal(amount) if amount is not None else None)\n"
+)
+
 
 def build_cases() -> list[Case]:
     return [
@@ -509,6 +522,10 @@ def build_cases() -> list[Case]:
                 "\n"
                 "def test_round_half_a_tenth():\n"
                 "    assert round_to_minor_units(Money(Decimal(\"0.005\"), \"USD\")).amount == Decimal(\"0.00\")\n"
+                "\n"
+                "\n"
+                "def test_round_three_and_a_half_tenths():\n"
+                "    assert round_to_minor_units(Money(Decimal(\"0.035\"), \"USD\")).amount == Decimal(\"0.04\")\n"
             ),
         ),
         Case(
@@ -599,9 +616,7 @@ def build_cases() -> list[Case]:
                 "from app.money import Money\n"
                 "\n"
                 "\n"
-                "def _t(txn_id, merchant, status, currency, amount):\n"
-                "    return Transaction(txn_id, merchant, status, currency,\n"
-                "                       Decimal(amount) if amount is not None else None)\n"
+                + _TXN_HELPER +
                 "\n"
                 "\n"
                 "def test_revenue_excludes_refunded_transactions():\n"
@@ -654,9 +669,7 @@ def build_cases() -> list[Case]:
                 "from app.money import Money\n"
                 "\n"
                 "\n"
-                "def _t(txn_id, merchant, status, currency, amount):\n"
-                "    return Transaction(txn_id, merchant, status, currency,\n"
-                "                       Decimal(amount) if amount is not None else None)\n"
+                + _TXN_HELPER +
                 "\n"
                 "\n"
                 "def test_average_with_unsettled_transaction():\n"
@@ -717,9 +730,7 @@ def build_cases() -> list[Case]:
                 "from app.money import Money\n"
                 "\n"
                 "\n"
-                "def _t(txn_id, merchant, status, currency, amount):\n"
-                "    return Transaction(txn_id, merchant, status, currency,\n"
-                "                       Decimal(amount) if amount is not None else None)\n"
+                + _TXN_HELPER +
                 "\n"
                 "\n"
                 "def test_top_merchants_ranks_by_completed_revenue():\n"
@@ -762,6 +773,11 @@ def main() -> int:
     cases_dir.mkdir(exist_ok=True)
 
     for case in cases:
+        if case.category not in CATEGORIES or case.grading not in GRADINGS:
+            raise SystemExit(
+                f"case {case.id}: invalid category/grading "
+                f"({case.category!r}/{case.grading!r})"
+            )
         clean_target = (REPO / case.target_file).read_text()
         data = _yaml_for(case, clean_target)
         _verify(case, data)

@@ -9,7 +9,7 @@ prompt: |-
 breaking_patch: |
   --- a/app/analysis.py
   +++ b/app/analysis.py
-  @@ -106,9 +106,9 @@
+  @@ -123,9 +123,9 @@
        and the count. Returns None when no transaction qualifies.
        """
        amounts = [
@@ -50,7 +50,7 @@ test_patch: |
 reference_patch: |
   --- a/app/analysis.py
   +++ b/app/analysis.py
-  @@ -106,9 +106,9 @@
+  @@ -123,9 +123,9 @@
        and the count. Returns None when no transaction qualifies.
        """
        amounts = [

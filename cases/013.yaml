@@ -9,7 +9,7 @@ prompt: |-
 breaking_patch: |
   --- a/app/analysis.py
   +++ b/app/analysis.py
-  @@ -92,7 +92,7 @@
+  @@ -106,7 +106,7 @@
        """
        totals: dict[str, Money] = {}
        for t in txns:
@@ -17,7 +17,7 @@ breaking_patch: |
   +        if t.status == "failed" or t.amount is None:
                continue
            m = round_to_minor_units(Money(t.amount, t.currency))
-           totals[t.currency] = add(totals[t.currency], m) if t.currency in totals else m
+           if t.currency in totals:
 test_patch: |
   --- /dev/null
   +++ b/tests/test_013_revenue_status_filter.py
@@ -49,7 +49,7 @@ test_patch: |
 reference_patch: |
   --- a/app/analysis.py
   +++ b/app/analysis.py
-  @@ -92,7 +92,7 @@
+  @@ -106,7 +106,7 @@
        """
        totals: dict[str, Money] = {}
        for t in txns:
@@ -57,4 +57,4 @@ reference_patch: |
   +        if t.status != "completed" or t.amount is None:
                continue
            m = round_to_minor_units(Money(t.amount, t.currency))
-           totals[t.currency] = add(totals[t.currency], m) if t.currency in totals else m
+           if t.currency in totals:

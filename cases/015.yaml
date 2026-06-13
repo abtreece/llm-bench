@@ -9,7 +9,7 @@ prompt: |-
 breaking_patch: |
   --- a/app/analysis.py
   +++ b/app/analysis.py
-  @@ -123,15 +123,4 @@
+  @@ -140,15 +140,4 @@
        Sorted by revenue descending; ties broken by merchant name ascending.
        Transactions with no amount are skipped. Raises ValueError if n < 1.
        """
@@ -73,7 +73,7 @@ test_patch: |
 reference_patch: |
   --- a/app/analysis.py
   +++ b/app/analysis.py
-  @@ -123,4 +123,15 @@
+  @@ -140,4 +140,15 @@
        Sorted by revenue descending; ties broken by merchant name ascending.
        Transactions with no amount are skipped. Raises ValueError if n < 1.
        """

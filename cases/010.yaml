@@ -15,7 +15,7 @@ breaking_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -85,7 +85,7 @@\n    
 test_patch: |
   --- /dev/null
   +++ b/tests/test_010_default_rounding_mode.py
-  @@ -0,0 +1,10 @@
+  @@ -0,0 +1,14 @@
   +from decimal import Decimal
   +from app.money import Money, round_to_minor_units
   +
@@ -26,6 +26,10 @@ test_patch: |
   +
   +def test_round_half_a_tenth():
   +    assert round_to_minor_units(Money(Decimal("0.005"), "USD")).amount == Decimal("0.00")
+  +
+  +
+  +def test_round_three_and_a_half_tenths():
+  +    assert round_to_minor_units(Money(Decimal("0.035"), "USD")).amount == Decimal("0.04")
 reference_patch: "--- a/app/money.py\n+++ b/app/money.py\n@@ -85,7 +85,7 @@\n    \
   \ return int(scaled)\n \n \n-def round_to_minor_units(m: Money, rounding: str =\
   \ \"ROUND_HALF_UP\") -> Money:\n+def round_to_minor_units(m: Money, rounding: str\
