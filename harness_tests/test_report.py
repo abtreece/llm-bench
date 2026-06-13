@@ -129,9 +129,17 @@ class TestRender:
         assert "bench_version: 2, 3" in report.render([v2, v3])
         assert "not comparable" in report.render([v2, v3])
 
-    def test_rows_without_bench_version_render_quietly(self):
-        text = report.render([make_row("model-a", passed=True)])
-        assert "bench_version" not in text
+    def test_rows_without_bench_version_count_as_v1(self):
+        unversioned = make_row("model-a", passed=True)
+        v2 = make_row("model-a", attempt=2, passed=True) | {"bench_version": "2"}
+        assert "bench_version: 1\n" in report.render([unversioned])
+        assert "bench_version: 1, 2" in report.render([unversioned, v2])
+        assert "not comparable" in report.render([unversioned, v2])
+
+    def test_bench_versions_sort_numerically(self):
+        v2 = make_row("model-a", passed=True) | {"bench_version": "2"}
+        v10 = make_row("model-a", attempt=2, passed=True) | {"bench_version": "10"}
+        assert "bench_version: 2, 10" in report.render([v2, v10])
 
     def test_error_kinds_counted(self):
         rows = [
