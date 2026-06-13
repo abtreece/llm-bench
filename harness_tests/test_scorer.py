@@ -80,6 +80,18 @@ class TestApplyBlocks:
         assert sorted(blocked) == ["conftest.py", "pytest.ini", "tests/test_money_misc.py"]
         assert not (tmp_path / "tests").exists()
 
+    def test_blocks_traversal_and_absolute_paths_directly(self, tmp_path):
+        # Defense-in-depth: apply_blocks must hold its own boundary even
+        # for paths extract_blocks would have rejected.
+        blocks = {
+            "app/../tests/test_x.py": "assert True",
+            "/etc/passwd": "x",
+        }
+        written, blocked = scorer.apply_blocks(tmp_path, blocks)
+        assert written == []
+        assert sorted(blocked) == ["/etc/passwd", "app/../tests/test_x.py"]
+        assert not (tmp_path / "tests").exists()
+
     def test_blocks_fixture_data_writes(self, tmp_path):
         blocks = {
             "app/analysis.py": "x = 1",

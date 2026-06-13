@@ -95,8 +95,13 @@ def apply_blocks(
     blocked: list[str] = []
     for relpath, body in blocks.items():
         norm = relpath[2:] if relpath.startswith("./") else relpath
+        # extract_blocks already rejects traversal, but the write boundary
+        # must not depend on the caller: "app/../tests/x.py" passes a
+        # string-prefix check while resolving outside the worktree.
         if (
-            not any(norm.startswith(p) for p in allowed_prefixes)
+            norm.startswith("/")
+            or ".." in norm.split("/")
+            or not any(norm.startswith(p) for p in allowed_prefixes)
             or any(norm.startswith(p) for p in denied_prefixes)
         ):
             blocked.append(norm)
