@@ -102,16 +102,27 @@ def warm_up(
 
 
 def models_from_tags(data: dict) -> list[dict]:
-    """Pure extraction from an /api/tags payload: [{"name", "size_gb"}].
+    """Pure extraction from an /api/tags payload:
+    [{"name", "size_gb", "digest", "families"}].
 
     Ollama reports size in bytes; GB = bytes / 1e9 to match the registry's
-    decimal-GB convention used in models.yaml and catalog.yaml.
+    decimal-GB convention used in models.yaml and catalog.yaml. digest is
+    the manifest sha256 (bare hex), shared by all tags of the same model.
     """
+    models: list[dict] = []
     # `or []`: Ollama's Go server marshals a nil slice as {"models": null}.
-    return [
-        {"name": m["name"], "size_gb": int(m.get("size", 0)) / 1e9}
-        for m in data.get("models") or []
-    ]
+    for m in data.get("models") or []:
+        details = m.get("details") or {}
+        # Older payloads carry "family" with "families": null.
+        families = details.get("families") or (
+            [details["family"]] if details.get("family") else [])
+        models.append({
+            "name": m["name"],
+            "size_gb": int(m.get("size", 0)) / 1e9,
+            "digest": str(m.get("digest") or ""),
+            "families": list(families),
+        })
+    return models
 
 
 def list_local_models(base_url: str = DEFAULT_BASE_URL) -> list[dict]:
