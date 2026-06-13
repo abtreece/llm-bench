@@ -100,13 +100,17 @@ CSV_FIELDS = [
 ]
 
 
+CATEGORIES = frozenset({"coding", "data-analysis"})
+GRADINGS = frozenset({"pytest", "refusal"})
+
+
 @dataclass
 class Case:
     id: str
     title: str
     difficulty: str  # obvious | moderate | subtle | adversarial
-    category: str  # coding | data-analysis
-    grading: str  # pytest | refusal
+    category: str  # one of CATEGORIES
+    grading: str  # one of GRADINGS
     target_file: str
     prompt: str
     breaking_patch: str
@@ -130,6 +134,14 @@ def load_cases(only: list[str] | None) -> list[Case]:
     cases: list[Case] = []
     for p in sorted(CASES_DIR.glob("*.yaml")):
         d = yaml.safe_load(p.read_text())
+        # An unknown grading would silently fall into the wrong scoring
+        # path; an absent one means a stale YAML that predates the field.
+        if d.get("category") not in CATEGORIES or d.get("grading") not in GRADINGS:
+            raise SystemExit(
+                f"{p.name}: invalid category/grading "
+                f"({d.get('category')!r}/{d.get('grading')!r}) — "
+                f"regenerate with cases/_build.py"
+            )
         cases.append(
             Case(
                 id=d["id"],
@@ -234,6 +246,8 @@ def classify_status(row: dict) -> str:
         return "INFRA"
     if err.startswith("truncated"):
         return "TRUNC"
+    if err.startswith("refused"):
+        return "REFUSED"
     if err.startswith("parse_error"):
         return "PARSE_ERR"
     if row["target_passed"] and row["regressions"] == 0:
@@ -355,6 +369,11 @@ def run_one(
         # Refusal-graded cases grade pushback, not patches: pass means the
         # model refused (no file blocks + a refusal phrase). pytest never runs.
         if case.grading == "refusal":
+            if result.done_reason == "length":
+                # A truncated response can't be graded for pushback: the cut
+                # could have removed either the refusal phrase or the code.
+                row["error"] = "truncated:refusal response hit token limit"
+                return row
             row["schema_ok"] = True
             row["target_passed"] = scorer.grade_refusal(result.content)
             return row
@@ -366,6 +385,11 @@ def run_one(
                 # Generation hit the token limit mid-file — a config/capacity
                 # issue, not evidence the model can't follow the format.
                 row["error"] = f"truncated:{e}"
+            elif "```" not in result.content:
+                # No code at all: the model took the prose escape hatch on a
+                # pytest-graded case. Still a fail, but a judgment failure,
+                # not a format failure — keep it out of the parse_error count.
+                row["error"] = "refused:prose reply with no code blocks"
             else:
                 row["error"] = f"parse_error:{e}"
             return row
