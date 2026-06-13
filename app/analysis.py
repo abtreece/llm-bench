@@ -19,7 +19,13 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 
-from app.money import Money, add, round_to_minor_units
+from app.money import (
+    Money,
+    UnknownCurrencyError,
+    add,
+    minor_units,
+    round_to_minor_units,
+)
 
 
 class AnalysisError(Exception):
@@ -39,45 +45,53 @@ class Transaction:
     amount: Decimal | None  # None when the processor reported no amount
 
 
-_REQUIRED_FIELDS = ("txn_id", "merchant", "status", "currency", "amount")
+_REQUIRED_NONEMPTY = ("txn_id", "merchant", "status", "currency")
 _STATUSES = {"completed", "refunded", "failed"}
 
 
 def load_transactions(path: str | Path) -> list[Transaction]:
     """Parse a transactions CSV into Transaction records.
 
-    Empty amount cells become None. A missing column, an unknown status,
-    or an unparseable amount raises MalformedRowError.
+    Empty amount cells become None. A missing field, an unknown status or
+    currency, or an unparseable amount raises MalformedRowError.
     """
     txns: list[Transaction] = []
     with open(path, newline="") as fh:
         reader = csv.DictReader(fh)
-        for lineno, raw in enumerate(reader, start=2):
-            missing = [
-                f for f in _REQUIRED_FIELDS
-                if f != "amount" and raw.get(f) in (None, "")
-            ]
+        for raw in reader:
+            # reader.line_num tracks physical lines, staying accurate
+            # across quoted fields with embedded newlines.
+            line = reader.line_num
+            fields = {k: (v or "").strip() for k, v in raw.items() if k}
+            missing = [f for f in _REQUIRED_NONEMPTY if not fields.get(f)]
             if missing:
-                raise MalformedRowError(f"line {lineno}: missing {missing}")
-            status = raw["status"].strip().lower()
+                raise MalformedRowError(f"line {line}: missing {missing}")
+            status = fields["status"].lower()
             if status not in _STATUSES:
                 raise MalformedRowError(
-                    f"line {lineno}: unknown status {raw['status']!r}"
+                    f"line {line}: unknown status {fields['status']!r}"
                 )
-            cell = (raw.get("amount") or "").strip()
+            currency = fields["currency"]
+            try:
+                minor_units(currency)
+            except UnknownCurrencyError:
+                raise MalformedRowError(
+                    f"line {line}: unknown currency {currency!r}"
+                )
+            cell = fields.get("amount", "")
             if cell:
                 try:
                     amount: Decimal | None = Decimal(cell)
                 except InvalidOperation:
-                    raise MalformedRowError(f"line {lineno}: bad amount {cell!r}")
+                    raise MalformedRowError(f"line {line}: bad amount {cell!r}")
             else:
                 amount = None
             txns.append(
                 Transaction(
-                    txn_id=raw["txn_id"].strip(),
-                    merchant=raw["merchant"].strip(),
+                    txn_id=fields["txn_id"],
+                    merchant=fields["merchant"],
                     status=status,
-                    currency=raw["currency"].strip(),
+                    currency=currency,
                     amount=amount,
                 )
             )
@@ -95,7 +109,10 @@ def revenue_by_currency(txns: Iterable[Transaction]) -> dict[str, Money]:
         if t.status != "completed" or t.amount is None:
             continue
         m = round_to_minor_units(Money(t.amount, t.currency))
-        totals[t.currency] = add(totals[t.currency], m) if t.currency in totals else m
+        if t.currency in totals:
+            totals[t.currency] = add(totals[t.currency], m)
+        else:
+            totals[t.currency] = m
     return totals
 
 

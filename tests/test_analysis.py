@@ -55,6 +55,18 @@ class TestLoadTransactions:
         with pytest.raises(MalformedRowError, match="missing"):
             load_transactions(p)
 
+    def test_whitespace_only_field_raises(self, tmp_path):
+        p = tmp_path / "bad.csv"
+        p.write_text("txn_id,merchant,status,currency,amount\nt1,   ,completed,USD,1.00\n")
+        with pytest.raises(MalformedRowError, match="missing"):
+            load_transactions(p)
+
+    def test_unknown_currency_raises_at_load(self, tmp_path):
+        p = tmp_path / "bad.csv"
+        p.write_text("txn_id,merchant,status,currency,amount\nt1,Acme,completed,XXX,1.00\n")
+        with pytest.raises(MalformedRowError, match="unknown currency"):
+            load_transactions(p)
+
 
 class TestRevenueByCurrency:
     def test_fixture_totals(self):

@@ -80,6 +80,16 @@ class TestApplyBlocks:
         assert sorted(blocked) == ["conftest.py", "pytest.ini", "tests/test_money_misc.py"]
         assert not (tmp_path / "tests").exists()
 
+    def test_blocks_fixture_data_writes(self, tmp_path):
+        blocks = {
+            "app/analysis.py": "x = 1",
+            "app/data/transactions.csv": "txn_id\nrigged",
+        }
+        written, blocked = scorer.apply_blocks(tmp_path, blocks)
+        assert written == ["app/analysis.py"]
+        assert blocked == ["app/data/transactions.csv"]
+        assert not (tmp_path / "app/data").exists()
+
     def test_normalizes_leading_dot_slash(self, tmp_path):
         written, _ = scorer.apply_blocks(tmp_path, {"./app/money.py": "x = 1"})
         assert written == ["app/money.py"]
