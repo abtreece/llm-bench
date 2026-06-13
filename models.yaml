@@ -2,21 +2,34 @@
 # Order: smallest first so harness bugs surface quickly on cheap models.
 # Endpoint: http://localhost:11434
 #
-# Selection rationale: javelin now has an NVIDIA Tesla T4 (16 GiB) and
-# Ollama runs GPU-accelerated. The roster below was curated when the host
-# was CPU-only (qwen2.5 instruct sizes that finished a 250-line Python
-# file in under 10 minutes on CPU); it is kept as-is for comparability
-# with the CPU-era runs. On the T4, larger or thinking models (qwen3,
-# 30B+ with partial offload) may now be practical — revisit once
-# comparison against the old baselines is no longer needed.
+# Selection rationale: bench v2 orphaned the CPU-era baselines, so the
+# old qwen2.5-only freeze no longer applies. The roster's weights all fit
+# the T4's VRAM and are chosen for paired comparisons: base vs coder
+# finetune at 7B and 14B (qwen2.5), thinking vs not at 4B and 14B
+# (qwen3, deepseek-r1), cross-family at the small tier (nemotron-3-nano
+# vs qwen3 at 4B), plus a coder MoE (deepseek-coder-v2). qwen3-coder:30b
+# (18 GB, partial CPU offload) was considered and deferred. Roster
+# ratified 2026-06-12 ahead of the v2 baseline run.
 models:
   - name: qwen2.5:1.5b
     size_gb: 1.0
   - name: qwen2.5:3b
     size_gb: 1.9
+  - name: qwen3:4b
+    size_gb: 2.5
+  - name: nemotron-3-nano:4b
+    size_gb: 2.8
   - name: qwen2.5:7b
     size_gb: 4.7
   - name: qwen2.5-coder:7b
     size_gb: 4.7
+  - name: deepseek-coder-v2:latest
+    size_gb: 8.9
   - name: qwen2.5:14b
     size_gb: 9.0
+  - name: qwen2.5-coder:14b
+    size_gb: 9.0
+  - name: deepseek-r1:14b
+    size_gb: 9.0
+  - name: qwen3:14b
+    size_gb: 9.3

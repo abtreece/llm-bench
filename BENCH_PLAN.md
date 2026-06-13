@@ -39,11 +39,29 @@ run was collected:
   rerun it; it verifies each bug breaks its focused test and each
   reference patch fixes it. Never hand-edit `cases/*.yaml`.
 
-Next: Phase 5 smoke (include case 012 and one data-analysis case — the
-refusal and analytics paths have never touched live model output), then
-the Phase 6 full run, which becomes the v2 baseline. **Decide the model
-roster before Phase 6** — see Phase 8 notes; the CPU-era freeze rationale
-no longer applies.
+**Phase 5 smoke passed** (2026-06-12, run `20260613-004245` on javelin,
+Ollama 0.24.0): `qwen2.5:3b` × cases 001/012/013 × 1 attempt. All three
+grading paths (pytest-coding, refusal, pytest-data-analysis) completed a
+clean loop against live model output; `schema_ok=True` on every row; the
+model failed all three on merit, as expected for a 3B. Note the plan's
+original smoke command named `qwen3:4b`, which `load_models` rejected
+because it wasn't in `models.yaml` — the smoke ran with `qwen2.5:3b`
+instead.
+
+**Roster decided** (2026-06-12): qwen2.5 ladder (base + coder at 7B and
+14B) + `qwen3:4b`, `qwen3:14b`, `nemotron-3-nano:4b`,
+`deepseek-coder-v2:latest`, `deepseek-r1:14b` — 11 models, weights all
+within the T4's VRAM, chosen for paired comparisons (base vs coder,
+thinking vs not, cross-family at 4B). `qwen3-coder:30b` deferred
+(partial CPU offload); GLM/MiniMax/Kimi headliners are cloud-only on
+Ollama or >19 GB. Thinking models required harness support: Ollama ≥ 0.9
+routes reasoning to `message.thinking` (verified empirically on
+javelin's 0.24.0), which the client now captures and `run.py` saves as a
+`thinking.txt` artifact. Thinking tokens count toward
+`completion_tokens`, so tokens/sec reflects true generation cost.
+
+Next: the Phase 6 full run (11 models × 15 cases × 3 attempts = 495
+invocations), which becomes the v2 baseline.
 
 ---
 
@@ -395,20 +413,29 @@ Sequenced by what the v2 baseline shows; none of this before Phases 5–7.
 
 ## Reference: models on javelin
 
+Per `ollama list` on 2026-06-12 (Ollama 0.24.0):
+
 ```
-laguna-xs.2:latest    23 GB
-qwen3-coder:30b       18 GB
-qwen2.5:14b            9.0 GB
-qwen3.6:latest        23 GB
-gemma4:latest          9.6 GB
-qwen3:4b               2.5 GB
+qwen2.5:1.5b                986 MB
+qwen2.5:3b                  1.9 GB
+qwen3:4b                    2.5 GB    (thinking)
+nemotron-3-nano:4b          2.8 GB    (thinking)
+qwen2.5:7b                  4.7 GB
+qwen2.5-coder:7b            4.7 GB
+deepseek-coder-v2:latest    8.9 GB
+qwen2.5:14b                 9.0 GB
+qwen2.5-coder:14b           9.0 GB
+deepseek-r1:14b             9.0 GB    (thinking)
+qwen3:14b                   9.3 GB    (thinking)
+qwen3-coder:30b             18 GB     (not in roster: exceeds T4 VRAM)
+nomic-embed-text:latest     274 MB    (embedding, not benchmarkable)
 ```
 
 Ollama endpoint: `http://localhost:11434`. Verify with
 `curl http://localhost:11434/api/version` before Phase 5.
 
-Default `models.yaml` order: smallest first (qwen3:4b) to catch
-harness bugs quickly. The 4B is expected to fail most/all cases and
+Default `models.yaml` order: smallest first (qwen2.5:1.5b) to catch
+harness bugs quickly. The 1.5B is expected to fail most/all cases and
 serves as the floor sanity check.
 
 ---
