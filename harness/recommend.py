@@ -2,7 +2,9 @@
 
 Probes the host's accelerator/RAM budget, checks installed Ollama models
 and the curated catalog.yaml against it, and prints a report plus a
-paste-ready models.yaml snippet. Never writes any file; models.yaml
+paste-ready models.yaml snippet. Non-chat models (embeddings) are skipped,
+and worth-pulling suggestions already installed under an aliased tag are
+deduped via registry manifest digests. Never writes any file; models.yaml
 remains the single source of truth for harness.run.
 
 CLI:
@@ -220,6 +222,23 @@ class Tiers:
     worth_pulling: list[ModelFit]  # catalog, fits, not installed
 
 
+# Embedding models ship bert-family encoders per /api/tags details.families.
+EMBEDDING_FAMILIES = {"bert", "nomic-bert"}
+
+
+def is_chat_model(model: dict) -> bool:
+    """Whether an installed model can serve /api/chat (benchmark warm-up).
+
+    families is the /api/tags signal; the name check also catches embedding
+    models that report their base chat family (e.g. qwen3-embedding -> qwen3)
+    and is the only signal when families is absent.
+    """
+    families = model.get("families") or []
+    if families and all(f in EMBEDDING_FAMILIES for f in families):
+        return False
+    return "embed" not in model["name"].lower()
+
+
 def select_tiers(
     installed: list[dict],
     catalog: list[dict],
@@ -234,6 +253,9 @@ def select_tiers(
     def by_size(f: ModelFit) -> float:
         return f.size_gb
 
+    # Pasting a non-chat model (embeddings) into models.yaml would crash
+    # harness.run at warm-up, so they never enter any tier.
+    installed = [m for m in installed if is_chat_model(m)]
     installed_names = {m["name"] for m in installed}
     selected = sorted(
         (fit(m) for m in installed if fits(m["size_gb"], budget_gb, headroom_gb)),
@@ -247,6 +269,23 @@ def select_tiers(
          and fits(m["size_gb"], budget_gb, headroom_gb)),
         key=by_size)
     return Tiers(selected, excluded, worth_pulling)
+
+
+def drop_installed_digests(
+    tiers: Tiers,
+    catalog_digests: dict[str, str | None],
+    installed_digests: set[str],
+) -> Tiers:
+    """Drop worth-pulling entries whose registry digest is already installed.
+
+    Catches tag aliases (deepseek-coder-v2:latest IS the 16b default tag)
+    that name comparison misses. Unresolved entries (None digest) fail open:
+    the worst case is suggesting a redundant pull, while failing closed
+    would hide a real suggestion.
+    """
+    worth = [f for f in tiers.worth_pulling
+             if catalog_digests.get(f.name) not in installed_digests]
+    return Tiers(tiers.selected, tiers.excluded, worth)
 
 
 def render_snippet(tiers: Tiers) -> str:
@@ -310,6 +349,33 @@ def render_report(
         out.append("# models.yaml snippet")
         out.append(render_snippet(tiers))
     return "\n".join(out)
+
+
+REGISTRY_BASE_URL = "https://registry.ollama.ai"
+
+
+def registry_digest(name: str, *, base_url: str = REGISTRY_BASE_URL) -> str | None:
+    """Manifest digest for a registry tag; None when offline or unknown.
+
+    The registry answers manifest HEADs with an Ollama-Content-Digest header
+    (bare-hex sha256 of the manifest, the same value /api/tags reports for
+    installed models); Docker-Content-Digest is the spec-standard fallback.
+    """
+    model, _, tag = name.partition(":")
+    repo = model if "/" in model else f"library/{model}"
+    try:
+        r = requests.head(
+            f"{base_url}/v2/{repo}/manifests/{tag or 'latest'}",
+            headers={"Accept": "application/vnd.docker.distribution.manifest.v2+json"},
+            timeout=5,
+        )
+    except requests.RequestException:
+        return None
+    if not r.ok:
+        return None
+    digest = (r.headers.get("ollama-content-digest")
+              or r.headers.get("docker-content-digest", ""))
+    return digest.removeprefix("sha256:") or None
 
 
 def _run(cmd: list[str]) -> str | None:
@@ -388,6 +454,11 @@ def main(argv: list[str] | None = None) -> int:
 
     tiers = select_tiers(installed, load_catalog(),
                          budget_gb=hw.budget_gb, headroom_gb=args.headroom_gb)
+    installed_digests = {d for m in installed if (d := m.get("digest"))}
+    if installed_digests and tiers.worth_pulling:
+        catalog_digests = {f.name: registry_digest(f.name)
+                           for f in tiers.worth_pulling}
+        tiers = drop_installed_digests(tiers, catalog_digests, installed_digests)
     sys.stdout.write(render_report(hw, tiers, headroom_gb=args.headroom_gb,
                                    ollama_note=ollama_note))
     return 0

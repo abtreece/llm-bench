@@ -9,7 +9,7 @@ class TestModelsFromTags:
     def test_converts_bytes_to_decimal_gb(self):
         data = {"models": [{"name": "qwen2.5:14b", "size": 9_000_000_000}]}
         assert ollama_client.models_from_tags(data) == [
-            {"name": "qwen2.5:14b", "size_gb": 9.0}
+            {"name": "qwen2.5:14b", "size_gb": 9.0, "digest": "", "families": []}
         ]
 
     def test_empty_and_missing_models_key(self):
@@ -19,6 +19,29 @@ class TestModelsFromTags:
     def test_null_models_key(self):
         # Go marshals a nil slice as null, so {"models": null} is realistic.
         assert ollama_client.models_from_tags({"models": None}) == []
+
+    def test_extracts_digest_and_families(self):
+        data = {"models": [{
+            "name": "nomic-embed-text:latest",
+            "size": 274_000_000,
+            "digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+            "details": {"family": "nomic-bert", "families": ["nomic-bert"]},
+        }]}
+        [m] = ollama_client.models_from_tags(data)
+        assert m["digest"].startswith("0a109f422b47")
+        assert m["families"] == ["nomic-bert"]
+
+    def test_families_falls_back_to_family_singular(self):
+        # Older payloads carry "family" with "families": null.
+        data = {"models": [{
+            "name": "llama3:8b", "size": 1,
+            "details": {"family": "llama", "families": None},
+        }]}
+        assert ollama_client.models_from_tags(data)[0]["families"] == ["llama"]
+
+    def test_missing_details_degrades_to_empty_families(self):
+        data = {"models": [{"name": "x:latest", "size": 1}]}
+        assert ollama_client.models_from_tags(data)[0]["families"] == []
 
 
 class TestCatalog:
@@ -248,6 +271,135 @@ class TestTierSelection:
                                        budget_gb=16.0, headroom_gb=2.0)
         assert [m.name for m in tiers.selected] == ["small", "big"]
 
+    def test_non_chat_models_dropped_from_all_tiers(self):
+        installed = [
+            {"name": "nomic-embed-text:latest", "size_gb": 0.27,
+             "families": ["nomic-bert"]},
+            {"name": "huge-embedder:latest", "size_gb": 99.0,
+             "families": ["bert"]},
+            {"name": "qwen2.5:14b", "size_gb": 9.0, "families": ["qwen2"]},
+        ]
+        tiers = recommend.select_tiers(installed, [],
+                                       budget_gb=T4_BUDGET, headroom_gb=2.0)
+        assert [m.name for m in tiers.selected] == ["qwen2.5:14b"]
+        assert tiers.excluded == []
+
+    def test_non_chat_filter_falls_back_to_name(self):
+        # No families data (older Ollama): the name heuristic must catch it.
+        installed = [{"name": "mxbai-embed-large:latest", "size_gb": 0.67}]
+        tiers = recommend.select_tiers(installed, [],
+                                       budget_gb=T4_BUDGET, headroom_gb=2.0)
+        assert tiers.selected == []
+
+
+class TestIsChatModel:
+    def test_bert_families_are_not_chat(self):
+        assert recommend.is_chat_model(
+            {"name": "nomic-embed-text:latest", "families": ["nomic-bert"]}) is False
+        assert recommend.is_chat_model(
+            {"name": "mxbai-embed-large:latest", "families": ["bert"]}) is False
+
+    def test_chat_family_is_chat(self):
+        assert recommend.is_chat_model(
+            {"name": "qwen2.5:14b", "families": ["qwen2"]}) is True
+
+    def test_multimodal_families_are_chat(self):
+        assert recommend.is_chat_model(
+            {"name": "llava:7b", "families": ["llama", "clip"]}) is True
+
+    def test_name_fallback_without_families(self):
+        assert recommend.is_chat_model(
+            {"name": "snowflake-arctic-embed:latest"}) is False
+        assert recommend.is_chat_model({"name": "qwen2.5:14b"}) is True
+
+    def test_embed_name_overrides_chat_family(self):
+        # qwen3-embedding reports its base chat family but cannot chat.
+        assert recommend.is_chat_model(
+            {"name": "qwen3-embedding:0.6b", "families": ["qwen3"]}) is False
+
+
+DEEPSEEK_DIGEST = "63fb193b3a9b4322a18e8c6b250ca2e70a5ff531e962dbf95ba089b2566f2fa5"
+
+
+class TestDropInstalledDigests:
+    WORTH = [
+        recommend.ModelFit("deepseek-coder-v2:16b", 8.9, 5.2),
+        recommend.ModelFit("qwen2.5-coder:14b", 9.0, 5.1),
+    ]
+
+    def test_drops_entry_resolving_to_installed_digest(self):
+        tiers = recommend.drop_installed_digests(
+            recommend.Tiers([], [], list(self.WORTH)),
+            {"deepseek-coder-v2:16b": DEEPSEEK_DIGEST},
+            {DEEPSEEK_DIGEST})
+        assert [m.name for m in tiers.worth_pulling] == ["qwen2.5-coder:14b"]
+
+    def test_unresolved_entries_fail_open(self):
+        tiers = recommend.drop_installed_digests(
+            recommend.Tiers([], [], list(self.WORTH)),
+            {"deepseek-coder-v2:16b": None},
+            {DEEPSEEK_DIGEST})
+        assert len(tiers.worth_pulling) == 2
+
+    def test_non_matching_digest_kept(self):
+        tiers = recommend.drop_installed_digests(
+            recommend.Tiers([], [], list(self.WORTH)),
+            {"deepseek-coder-v2:16b": "f00d"},
+            {DEEPSEEK_DIGEST})
+        assert len(tiers.worth_pulling) == 2
+
+    def test_other_tiers_untouched(self):
+        selected = [recommend.ModelFit("qwen2.5:14b", 9.0, 5.1)]
+        excluded = [recommend.ModelFit("qwen3-coder:30b", 19.0, -4.9)]
+        tiers = recommend.drop_installed_digests(
+            recommend.Tiers(selected, excluded, list(self.WORTH)),
+            {"deepseek-coder-v2:16b": DEEPSEEK_DIGEST},
+            {DEEPSEEK_DIGEST})
+        assert tiers.selected == selected and tiers.excluded == excluded
+
+
+class FakeHeadResp:
+    def __init__(self, status_code=200, headers=None):
+        self.status_code = status_code
+        self.ok = status_code < 400
+        # Real requests headers are case-insensitive; mirror that.
+        self.headers = recommend.requests.structures.CaseInsensitiveDict(headers or {})
+
+
+class TestRegistryDigest:
+    def test_resolves_via_ollama_content_digest_header(self, monkeypatch):
+        seen = {}
+        def fake_head(url, **kw):
+            seen["url"] = url
+            return FakeHeadResp(headers={"Ollama-Content-Digest": DEEPSEEK_DIGEST})
+        monkeypatch.setattr(recommend.requests, "head", fake_head)
+        assert recommend.registry_digest("deepseek-coder-v2:16b") == DEEPSEEK_DIGEST
+        assert seen["url"] == ("https://registry.ollama.ai/v2/library/"
+                               "deepseek-coder-v2/manifests/16b")
+
+    def test_strips_sha256_prefix_from_docker_header(self, monkeypatch):
+        monkeypatch.setattr(
+            recommend.requests, "head",
+            lambda url, **kw: FakeHeadResp(
+                headers={"Docker-Content-Digest": "sha256:abc123"}))
+        assert recommend.registry_digest("qwen3:8b") == "abc123"
+
+    def test_unreachable_registry_returns_none(self, monkeypatch):
+        def boom(url, **kw):
+            raise recommend.requests.ConnectionError("down")
+        monkeypatch.setattr(recommend.requests, "head", boom)
+        assert recommend.registry_digest("qwen3:8b") is None
+
+    def test_http_error_returns_none(self, monkeypatch):
+        monkeypatch.setattr(recommend.requests, "head",
+                            lambda url, **kw: FakeHeadResp(status_code=404))
+        assert recommend.registry_digest("no-such-model:1b") is None
+
+    def test_missing_digest_header_returns_none(self, monkeypatch):
+        monkeypatch.setattr(recommend.requests, "head",
+                            lambda url, **kw: FakeHeadResp())
+        assert recommend.registry_digest("qwen3:8b") is None
+
 
 def make_hw(**kw):
     base = dict(backend="cuda",
@@ -335,6 +487,47 @@ class TestMain:
         assert rc == 0
         assert "Ollama not reachable" in out
         assert "worth pulling" in out
+
+    def test_digest_alias_and_embedding_model_filtered(self, monkeypatch, capsys):
+        # The 2026-06-12 T4 run: deepseek-coder-v2:latest is the 16b default
+        # tag (same digest), and nomic-embed-text cannot chat. Neither the
+        # 16b catalog entry nor the embedding model may reach the output.
+        monkeypatch.setattr(
+            recommend, "probe_hardware",
+            lambda: recommend.Hardware("cuda", [recommend.Gpu("Tesla T4", 16.1)],
+                                       64.0, 16.1, []))
+        installed = [
+            {"name": "deepseek-coder-v2:latest", "size_gb": 8.9,
+             "digest": DEEPSEEK_DIGEST, "families": ["deepseek2"]},
+            {"name": "nomic-embed-text:latest", "size_gb": 0.27,
+             "digest": "aaaa", "families": ["nomic-bert"]},
+        ]
+        monkeypatch.setattr(recommend.ollama_client, "list_local_models",
+                            lambda base_url=None: installed)
+        monkeypatch.setattr(
+            recommend, "registry_digest",
+            lambda name: DEEPSEEK_DIGEST if name == "deepseek-coder-v2:16b" else None)
+        rc = recommend.main([])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "deepseek-coder-v2:latest" in out
+        assert "deepseek-coder-v2:16b" not in out
+        assert "nomic-embed-text" not in out
+
+    def test_no_registry_calls_without_installed_digests(self, monkeypatch, capsys):
+        # Nothing installed -> nothing to dedupe -> stay off the network.
+        monkeypatch.setattr(
+            recommend, "probe_hardware",
+            lambda: recommend.Hardware("cuda", [recommend.Gpu("Tesla T4", 16.1)],
+                                       64.0, 16.1, []))
+        monkeypatch.setattr(recommend.ollama_client, "list_local_models",
+                            lambda base_url=None: [])
+        def fail(name):
+            raise AssertionError("registry_digest must not be called")
+        monkeypatch.setattr(recommend, "registry_digest", fail)
+        rc = recommend.main([])
+        assert rc == 0
+        assert "worth pulling" in capsys.readouterr().out
 
     def test_malformed_tags_json_degrades_like_ollama_down(self, monkeypatch, capsys):
         # requests>=2.27 raises requests.exceptions.JSONDecodeError (a
