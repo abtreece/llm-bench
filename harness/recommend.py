@@ -254,8 +254,11 @@ def select_tiers(
         return f.size_gb
 
     # Pasting a non-chat model (embeddings) into models.yaml would crash
-    # harness.run at warm-up, so they never enter any tier.
+    # harness.run at warm-up, so they never enter any tier — including a
+    # mis-curated catalog entry (caught by the name fallback; catalog
+    # entries carry no families data).
     installed = [m for m in installed if is_chat_model(m)]
+    catalog = [m for m in catalog if is_chat_model(m)]
     installed_names = {m["name"] for m in installed}
     selected = sorted(
         (fit(m) for m in installed if fits(m["size_gb"], budget_gb, headroom_gb)),
@@ -454,7 +457,10 @@ def main(argv: list[str] | None = None) -> int:
 
     tiers = select_tiers(installed, load_catalog(),
                          budget_gb=hw.budget_gb, headroom_gb=args.headroom_gb)
-    installed_digests = {d for m in installed if (d := m.get("digest"))}
+    # Chat-capable digests only: embedding-model digests can never match a
+    # chat catalog entry, so they must not trigger registry lookups.
+    installed_digests = {d for m in installed
+                         if is_chat_model(m) and (d := m.get("digest"))}
     if installed_digests and tiers.worth_pulling:
         catalog_digests = {f.name: registry_digest(f.name)
                            for f in tiers.worth_pulling}

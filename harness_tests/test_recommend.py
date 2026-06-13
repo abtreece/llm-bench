@@ -291,6 +291,13 @@ class TestTierSelection:
                                        budget_gb=T4_BUDGET, headroom_gb=2.0)
         assert tiers.selected == []
 
+    def test_non_chat_catalog_entries_never_suggested(self):
+        # A mis-curated catalog entry must not reach worth_pulling either.
+        catalog = [{"name": "nomic-embed-text:latest", "size_gb": 0.27}]
+        tiers = recommend.select_tiers([], catalog,
+                                       budget_gb=T4_BUDGET, headroom_gb=2.0)
+        assert tiers.worth_pulling == []
+
 
 class TestIsChatModel:
     def test_bert_families_are_not_chat(self):
@@ -522,6 +529,24 @@ class TestMain:
                                        64.0, 16.1, []))
         monkeypatch.setattr(recommend.ollama_client, "list_local_models",
                             lambda base_url=None: [])
+        def fail(name):
+            raise AssertionError("registry_digest must not be called")
+        monkeypatch.setattr(recommend, "registry_digest", fail)
+        rc = recommend.main([])
+        assert rc == 0
+        assert "worth pulling" in capsys.readouterr().out
+
+    def test_no_registry_calls_for_non_chat_digests(self, monkeypatch, capsys):
+        # Only embedding models installed: their digests can never match a
+        # chat-only catalog, so the registry must not be contacted.
+        monkeypatch.setattr(
+            recommend, "probe_hardware",
+            lambda: recommend.Hardware("cuda", [recommend.Gpu("Tesla T4", 16.1)],
+                                       64.0, 16.1, []))
+        installed = [{"name": "nomic-embed-text:latest", "size_gb": 0.27,
+                      "digest": "aaaa", "families": ["nomic-bert"]}]
+        monkeypatch.setattr(recommend.ollama_client, "list_local_models",
+                            lambda base_url=None: installed)
         def fail(name):
             raise AssertionError("registry_digest must not be called")
         monkeypatch.setattr(recommend, "registry_digest", fail)
