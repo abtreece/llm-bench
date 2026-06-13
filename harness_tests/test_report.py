@@ -87,6 +87,60 @@ class TestRender:
             if "`model-a`" in line:
                 assert "✅" in line
 
+    def test_per_category_breakdown_when_multiple_categories(self, monkeypatch):
+        monkeypatch.setattr(report, "load_case_meta", lambda: {
+            "001": {"difficulty": "obvious", "category": "coding"},
+            "013": {"difficulty": "moderate", "category": "data-analysis"},
+        })
+        rows = [
+            make_row("model-a", case_id="001", passed=True),
+            make_row("model-a", case_id="013", passed=False),
+        ]
+        text = report.render(rows)
+        assert "## Per-category pass-rate" in text
+        assert "data-analysis" in text
+
+    def test_no_category_breakdown_for_single_category(self, monkeypatch):
+        monkeypatch.setattr(report, "load_case_meta", lambda: {
+            "001": {"difficulty": "obvious", "category": "coding"},
+        })
+        text = report.render([make_row("model-a", case_id="001", passed=True)])
+        assert "## Per-category pass-rate" not in text
+
+    def test_blocked_write_attempts_counted_per_model(self):
+        rows = [
+            make_row("model-a", attempt=1, passed=True) | {"blocked_paths": "tests/test_x.py"},
+            make_row("model-a", attempt=2, passed=True),
+        ]
+        text = report.render(rows)
+        assert "blocked writes" in text
+        summary_line = next(
+            line for line in text.splitlines()
+            if line.startswith("| `model-a`") and "GB" not in line
+        )
+        # ... | parse errs | timeouts | blocked writes | ...
+        assert "| 0 | 0 | 1 |" in summary_line
+
+    def test_bench_version_shown_and_mixed_versions_flagged(self):
+        v2 = make_row("model-a", passed=True) | {"bench_version": "2"}
+        v3 = make_row("model-a", attempt=2, passed=True) | {"bench_version": "3"}
+        assert "bench_version: 2\n" in report.render([v2, v2])
+        assert "not comparable" not in report.render([v2, v2])
+        assert "bench_version: 2, 3" in report.render([v2, v3])
+        assert "not comparable" in report.render([v2, v3])
+
+    def test_rows_without_bench_version_count_as_v1(self):
+        unversioned = make_row("model-a", passed=True)
+        v2 = make_row("model-a", attempt=2, passed=True) | {"bench_version": "2"}
+        assert "bench_version: 1\n" in report.render([unversioned])
+        assert "bench_version: 1, 2" in report.render([unversioned, v2])
+        assert "not comparable" in report.render([unversioned, v2])
+
+    def test_bench_versions_sort_numerically(self):
+        v2 = make_row("model-a", passed=True) | {"bench_version": "2"}
+        v10 = make_row("model-a", attempt=2, passed=True) | {"bench_version": "10"}
+        assert "bench_version: 2, 10" in report.render([v2, v10])
+
     def test_error_kinds_counted(self):
         rows = [
             make_row("m", attempt=1, err="timeout:300s"),

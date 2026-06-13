@@ -35,11 +35,14 @@ def load_rows(csv_path: Path) -> list[dict]:
         return list(csv.DictReader(fh))
 
 
-def load_case_difficulty() -> dict[str, str]:
-    out: dict[str, str] = {}
+def load_case_meta() -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
     for p in sorted(CASES_DIR.glob("*.yaml")):
         d = yaml.safe_load(p.read_text())
-        out[str(d["id"])] = d.get("difficulty", "-")
+        out[str(d["id"])] = {
+            "difficulty": d.get("difficulty", "-"),
+            "category": d.get("category", "-"),
+        }
     return out
 
 
@@ -78,7 +81,7 @@ def render(rows: list[dict]) -> str:
         by_case[r["case_id"]].append(r)
         by_model_case[(r["model"], r["case_id"])].append(r)
 
-    difficulty = load_case_difficulty()
+    case_meta = load_case_meta()
     sizes = load_model_sizes()
 
     out: list[str] = []
@@ -87,6 +90,15 @@ def render(rows: list[dict]) -> str:
     out.append(f"- rows: {len(rows)} ({len(scored)} scored, {len(excluded)} excluded as harness/infra)")
     out.append(f"- models: {len(by_model)}")
     out.append(f"- cases: {len(by_case)}")
+    # Rows from CSVs predating the bench_version column are version 1; they
+    # must count, or a v1+v2 mix would render unflagged. Numeric sort so
+    # "10" lands after "2".
+    versions = sorted(
+        {(r.get("bench_version") or "").strip() or "1" for r in rows},
+        key=lambda v: (not v.isdigit(), int(v) if v.isdigit() else v),
+    )
+    flag = " ⚠ mixed versions — rows are not comparable" if len(versions) > 1 else ""
+    out.append(f"- bench_version: {', '.join(versions)}{flag}")
     skipped_models = sorted({r["model"] for r in excluded} - set(by_model))
     if skipped_models:
         out.append(
@@ -111,6 +123,10 @@ def render(rows: list[dict]) -> str:
                 tok_per_s.append(toks / (dur_ms / 1000.0))
         parse_errs = sum(1 for r in rs if (r.get("error") or "").startswith("parse_error"))
         timeouts = sum(1 for r in rs if (r.get("error") or "").startswith("timeout"))
+        # Attempts where the model tried to write outside app/ (tests,
+        # conftest, ...). The sandbox neutralizes these, but trying is an
+        # instruction-following failure worth seeing per model.
+        blocked = sum(1 for r in rs if (r.get("blocked_paths") or "").strip())
         # Attempt 1 is the greedy (temperature 0) sample; later attempts are
         # temperature 0.4, so pass@1 is reported separately from the pooled rate.
         first = [r for r in rs if str(r.get("attempt", "")).strip() == "1"]
@@ -125,13 +141,14 @@ def render(rows: list[dict]) -> str:
             "tok_s": statistics.mean(tok_per_s) if tok_per_s else 0.0,
             "parse_errs": parse_errs,
             "timeouts": timeouts,
+            "blocked": blocked,
             "size_gb": sizes.get(model, 0.0),
         }
 
     out.append("## Per-model summary")
     out.append("")
-    out.append("| model | size (GB) | attempts | pass@1 | pass-rate (all) | parse errs | timeouts | mean regressions | median latency | mean tok/s |")
-    out.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    out.append("| model | size (GB) | attempts | pass@1 | pass-rate (all) | parse errs | timeouts | blocked writes | mean regressions | median latency | mean tok/s |")
+    out.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for model in sorted(stats):
         s = stats[model]
         lat = f"{s['med_lat']/1000:.0f}s" if s["med_lat"] else "-"
@@ -144,7 +161,7 @@ def render(rows: list[dict]) -> str:
         out.append(
             f"| `{model}` | {size} | {s['attempts']} | {p1} | "
             f"{s['passed']}/{s['attempts']} ({100*s['rate']:.0f}%) | "
-            f"{s['parse_errs']} | {s['timeouts']} | "
+            f"{s['parse_errs']} | {s['timeouts']} | {s['blocked']} | "
             f"{s['mean_regs']:.2f} | {lat} | {tok} |"
         )
     out.append("")
@@ -152,8 +169,8 @@ def render(rows: list[dict]) -> str:
     out.append("## Per-case results (best of N attempts)")
     out.append("")
     models = sorted(by_model.keys())
-    out.append("| case | difficulty | " + " | ".join(f"`{m}`" for m in models) + " |")
-    out.append("|---|---|" + "|".join("---" for _ in models) + "|")
+    out.append("| case | category | difficulty | " + " | ".join(f"`{m}`" for m in models) + " |")
+    out.append("|---|---|---|" + "|".join("---" for _ in models) + "|")
     for case_id in sorted(by_case.keys()):
         cells = []
         for m in models:
@@ -167,8 +184,37 @@ def render(rows: list[dict]) -> str:
                 cells.append("⚠")  # passed target but caused regressions
             else:
                 cells.append("❌")
-        out.append(f"| {case_id} | {difficulty.get(case_id, '-')} | " + " | ".join(cells) + " |")
+        meta = case_meta.get(case_id, {})
+        out.append(
+            f"| {case_id} | {meta.get('category', '-')} | {meta.get('difficulty', '-')} | "
+            + " | ".join(cells) + " |"
+        )
     out.append("")
+
+    # Per-category pass-rates, so capability areas (coding vs data-analysis
+    # vs ...) can be compared instead of one pooled number.
+    categories = sorted({
+        case_meta.get(cid, {}).get("category", "-") for cid in by_case
+    })
+    if len(categories) > 1:
+        out.append("## Per-category pass-rate (all attempts)")
+        out.append("")
+        out.append("| model | " + " | ".join(categories) + " |")
+        out.append("|---|" + "|".join("---:" for _ in categories) + "|")
+        for m in models:
+            cells = []
+            for cat in categories:
+                rs = [
+                    r for r in by_model[m]
+                    if case_meta.get(r["case_id"], {}).get("category", "-") == cat
+                ]
+                if not rs:
+                    cells.append("-")
+                    continue
+                passed = sum(1 for r in rs if clean_pass(r))
+                cells.append(f"{passed}/{len(rs)} ({100*passed/len(rs):.0f}%)")
+            out.append(f"| `{m}` | " + " | ".join(cells) + " |")
+        out.append("")
 
     out.append("## Pareto: pass-rate × median latency")
     out.append("")

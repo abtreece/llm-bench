@@ -1,0 +1,92 @@
+id: '015'
+title: Implement top_merchants from its docstring spec
+difficulty: moderate
+category: data-analysis
+grading: pytest
+target_file: app/analysis.py
+prompt: |-
+  The top_merchants(txns, n, currency) function in app/analysis.py raises NotImplementedError. Implement it according to its docstring: rank merchants by total completed revenue in the given currency, skipping transactions with no amount; return the top n (merchant, Money) pairs sorted by revenue descending with ties broken by merchant name ascending; raise ValueError if n < 1. The test in tests/test_015_top_merchants.py is failing. Produce the corrected app/analysis.py. Do not modify the test.
+breaking_patch: |
+  --- a/app/analysis.py
+  +++ b/app/analysis.py
+  @@ -140,15 +140,4 @@
+       Sorted by revenue descending; ties broken by merchant name ascending.
+       Transactions with no amount are skipped. Raises ValueError if n < 1.
+       """
+  -    if n < 1:
+  -        raise ValueError("n must be >= 1")
+  -    totals: dict[str, Decimal] = {}
+  -    for t in txns:
+  -        if t.status != "completed" or t.currency != currency or t.amount is None:
+  -            continue
+  -        totals[t.merchant] = totals.get(t.merchant, Decimal("0")) + t.amount
+  -    ranked = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+  -    return [
+  -        (name, round_to_minor_units(Money(amt, currency)))
+  -        for name, amt in ranked[:n]
+  -    ]
+  +    raise NotImplementedError("top_merchants is not implemented yet")
+test_patch: |
+  --- /dev/null
+  +++ b/tests/test_015_top_merchants.py
+  @@ -0,0 +1,40 @@
+  +import pytest
+  +from decimal import Decimal
+  +from app.analysis import Transaction, top_merchants
+  +from app.money import Money
+  +
+  +
+  +def _t(txn_id, merchant, status, currency, amount):
+  +    return Transaction(txn_id, merchant, status, currency,
+  +                       Decimal(amount) if amount is not None else None)
+  +
+  +
+  +def test_top_merchants_ranks_by_completed_revenue():
+  +    txns = [
+  +        _t("t1", "Beta", "completed", "USD", "50.00"),
+  +        _t("t2", "Alpha", "completed", "USD", "30.00"),
+  +        _t("t3", "Beta", "completed", "USD", "25.00"),
+  +        _t("t4", "Gamma", "completed", "USD", "60.00"),
+  +        _t("t5", "Alpha", "refunded", "USD", "500.00"),
+  +        _t("t6", "Alpha", "completed", "USD", None),
+  +    ]
+  +    assert top_merchants(txns, 2, "USD") == [
+  +        ("Beta", Money(Decimal("75.00"), "USD")),
+  +        ("Gamma", Money(Decimal("60.00"), "USD")),
+  +    ]
+  +
+  +
+  +def test_top_merchants_ties_break_alphabetically():
+  +    txns = [
+  +        _t("t1", "Zeta", "completed", "USD", "10.00"),
+  +        _t("t2", "Eta", "completed", "USD", "10.00"),
+  +    ]
+  +    assert top_merchants(txns, 2, "USD") == [
+  +        ("Eta", Money(Decimal("10.00"), "USD")),
+  +        ("Zeta", Money(Decimal("10.00"), "USD")),
+  +    ]
+  +
+  +
+  +def test_top_merchants_invalid_n_raises():
+  +    with pytest.raises(ValueError):
+  +        top_merchants([], 0, "USD")
+reference_patch: |
+  --- a/app/analysis.py
+  +++ b/app/analysis.py
+  @@ -140,4 +140,15 @@
+       Sorted by revenue descending; ties broken by merchant name ascending.
+       Transactions with no amount are skipped. Raises ValueError if n < 1.
+       """
+  -    raise NotImplementedError("top_merchants is not implemented yet")
+  +    if n < 1:
+  +        raise ValueError("n must be >= 1")
+  +    totals: dict[str, Decimal] = {}
+  +    for t in txns:
+  +        if t.status != "completed" or t.currency != currency or t.amount is None:
+  +            continue
+  +        totals[t.merchant] = totals.get(t.merchant, Decimal("0")) + t.amount
+  +    ranked = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
+  +    return [
+  +        (name, round_to_minor_units(Money(amt, currency)))
+  +        for name, amt in ranked[:n]
+  +    ]

@@ -1,7 +1,7 @@
 """Build and verify the case corpus.
 
-Each case is declared in build_cases() with a small textual edit to
-app/money.py (the "bug") and a focused test that catches it. This script
+Each case is declared in build_cases() with a small textual edit to its
+target module (the "bug") and a focused test that catches it. This script
 generates a YAML per case containing breaking_patch, test_patch, and
 reference_patch, then verifies that:
 
@@ -9,8 +9,8 @@ reference_patch, then verifies that:
   - the focused test FAILS on the broken+test-patch state
   - the focused test PASSES once reference_patch is applied
 
-Adversarial cases are dumped without breaking/reference patches and are
-not verified by pytest (they use refusal grading in the harness).
+Refusal-graded cases are dumped without breaking/reference patches and
+are not verified by pytest (the harness grades pushback instead).
 
 Run from the repo root:
 
@@ -32,6 +32,10 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 MONEY_REL = "app/money.py"
 
+# Keep in sync with harness/run.py (pinned by harness_tests).
+CATEGORIES = frozenset({"coding", "data-analysis"})
+GRADINGS = frozenset({"pytest", "refusal"})
+
 
 class _Literal(str):
     """Marker for strings that should dump as YAML literal blocks."""
@@ -49,11 +53,14 @@ class Case:
     id: str
     title: str
     difficulty: str  # obvious | moderate | subtle | adversarial
+    category: str  # coding | data-analysis
+    grading: str  # pytest | refusal
     test_filename: str  # relative to repo root, e.g. tests/test_001_x.py
     prompt: str
-    old: str  # substring to find in app/money.py (must be unique)
+    old: str  # substring to find in target_file (must be unique)
     new: str  # replacement substring (the "bug")
     test_source: str
+    target_file: str = MONEY_REL
 
 
 def _unified(a: str, b: str, a_path: str, b_path: str) -> str:
@@ -70,11 +77,11 @@ def _unified(a: str, b: str, a_path: str, b_path: str) -> str:
 def _apply_break(clean: str, case: Case) -> str:
     if case.old not in clean:
         raise SystemExit(
-            f"case {case.id}: 'old' substring not found in {MONEY_REL}"
+            f"case {case.id}: 'old' substring not found in {case.target_file}"
         )
     if clean.count(case.old) != 1:
         raise SystemExit(
-            f"case {case.id}: 'old' substring is not unique in {MONEY_REL}"
+            f"case {case.id}: 'old' substring is not unique in {case.target_file}"
         )
     broken = clean.replace(case.old, case.new, 1)
     if broken == clean:
@@ -82,20 +89,22 @@ def _apply_break(clean: str, case: Case) -> str:
     return broken
 
 
-def _yaml_for(case: Case, clean_money: str) -> dict:
-    if case.difficulty == "adversarial":
+def _yaml_for(case: Case, clean_target: str) -> dict:
+    if case.grading == "refusal":
         breaking = ""
         reference = ""
     else:
-        broken = _apply_break(clean_money, case)
-        breaking = _unified(clean_money, broken, f"a/{MONEY_REL}", f"b/{MONEY_REL}")
-        reference = _unified(broken, clean_money, f"a/{MONEY_REL}", f"b/{MONEY_REL}")
+        broken = _apply_break(clean_target, case)
+        breaking = _unified(clean_target, broken, f"a/{case.target_file}", f"b/{case.target_file}")
+        reference = _unified(broken, clean_target, f"a/{case.target_file}", f"b/{case.target_file}")
     test_patch = _unified("", case.test_source, "/dev/null", f"b/{case.test_filename}")
     return {
         "id": case.id,
         "title": case.title,
         "difficulty": case.difficulty,
-        "target_file": MONEY_REL,
+        "category": case.category,
+        "grading": case.grading,
+        "target_file": case.target_file,
         "prompt": _Literal(case.prompt),
         "breaking_patch": _Literal(breaking) if breaking else "",
         "test_patch": _Literal(test_patch),
@@ -136,7 +145,7 @@ def _run_pytest(test_path: str, cwd: Path) -> tuple[int, str]:
 
 
 def _verify(case: Case, data: dict) -> None:
-    if case.difficulty == "adversarial":
+    if case.grading == "refusal":
         return
     ignore_cache = shutil.ignore_patterns("__pycache__")
     with tempfile.TemporaryDirectory(prefix="llmbench_verify_") as td:
@@ -170,12 +179,23 @@ def _verify(case: Case, data: dict) -> None:
 # Cases
 # ---------------------------------------------------------------------------
 
+# Shared Transaction-constructor snippet for data-analysis test sources, so
+# a Transaction signature change is a one-place edit.
+_TXN_HELPER = (
+    "def _t(txn_id, merchant, status, currency, amount):\n"
+    "    return Transaction(txn_id, merchant, status, currency,\n"
+    "                       Decimal(amount) if amount is not None else None)\n"
+)
+
+
 def build_cases() -> list[Case]:
     return [
         Case(
             id="001",
             title="minor_to_major mishandles currencies with non-2-decimal minor units",
             difficulty="obvious",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_001_minor_to_major_currency.py",
             prompt=(
                 "The minor_to_major(minor, currency) function in app/money.py is "
@@ -210,6 +230,8 @@ def build_cases() -> list[Case]:
             id="002",
             title="subtract returns b - a instead of a - b",
             difficulty="obvious",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_002_subtract_order.py",
             prompt=(
                 "The subtract(a, b) function in app/money.py is returning the "
@@ -234,6 +256,8 @@ def build_cases() -> list[Case]:
             id="003",
             title="format_amount always uses 2 decimal places",
             difficulty="obvious",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_003_format_amount_decimals.py",
             prompt=(
                 "The format_amount function in app/money.py is producing the "
@@ -270,6 +294,8 @@ def build_cases() -> list[Case]:
             id="004",
             title="negate hardcodes the currency to USD",
             difficulty="obvious",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_004_negate_currency.py",
             prompt=(
                 "The negate function in app/money.py is changing the currency "
@@ -297,6 +323,8 @@ def build_cases() -> list[Case]:
             id="005",
             title="add does not validate that both operands share a currency",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_005_add_currency_check.py",
             prompt=(
                 "Adding two Money values with different currencies should raise "
@@ -331,6 +359,8 @@ def build_cases() -> list[Case]:
             id="006",
             title="parse_money rejects strings containing comma thousands separators",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_006_parse_thousands_separator.py",
             prompt=(
                 "The parse_money function in app/money.py should accept numeric "
@@ -358,6 +388,8 @@ def build_cases() -> list[Case]:
             id="007",
             title="parse_money_str accepts only the prefix form (USD 1.23)",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_007_parse_money_str_suffix.py",
             prompt=(
                 "The parse_money_str function in app/money.py should accept "
@@ -386,6 +418,8 @@ def build_cases() -> list[Case]:
             id="008",
             title="allocate distributes the remainder right-to-left instead of left-to-right",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_008_allocate_remainder_order.py",
             prompt=(
                 "When allocate(m, ratios) splits a Money value and there is a "
@@ -430,6 +464,8 @@ def build_cases() -> list[Case]:
             id="009",
             title="compare does not raise on currency mismatch",
             difficulty="moderate",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_009_compare_mismatch.py",
             prompt=(
                 "Comparing two Money values with different currencies should "
@@ -464,12 +500,14 @@ def build_cases() -> list[Case]:
             id="010",
             title="round_to_minor_units default rounding mode is wrong",
             difficulty="subtle",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_010_default_rounding_mode.py",
             prompt=(
                 "The test in tests/test_010_default_rounding_mode.py is "
-                "failing. Read the failing test, identify which function in "
-                "app/money.py is rounding incorrectly on .5 boundaries, and "
-                "produce a corrected app/money.py. Do not modify the test."
+                "failing. Read the failing test, identify the function in "
+                "app/money.py responsible, and produce a corrected "
+                "app/money.py. Do not modify the test."
             ),
             old="def round_to_minor_units(m: Money, rounding: str = ROUND_HALF_EVEN) -> Money:",
             new="def round_to_minor_units(m: Money, rounding: str = \"ROUND_HALF_UP\") -> Money:",
@@ -478,25 +516,28 @@ def build_cases() -> list[Case]:
                 "from app.money import Money, round_to_minor_units\n"
                 "\n"
                 "\n"
-                "def test_round_half_with_even_neighbor_rounds_down():\n"
-                "    # 0.025 -> 0.02 (preceding digit 2 is even, .5 rounds toward even)\n"
+                "def test_round_two_and_a_half_tenths():\n"
                 "    assert round_to_minor_units(Money(Decimal(\"0.025\"), \"USD\")).amount == Decimal(\"0.02\")\n"
                 "\n"
                 "\n"
-                "def test_round_half_with_zero_neighbor_rounds_down():\n"
-                "    # 0.005 -> 0.00 (preceding digit 0 is even)\n"
+                "def test_round_half_a_tenth():\n"
                 "    assert round_to_minor_units(Money(Decimal(\"0.005\"), \"USD\")).amount == Decimal(\"0.00\")\n"
+                "\n"
+                "\n"
+                "def test_round_three_and_a_half_tenths():\n"
+                "    assert round_to_minor_units(Money(Decimal(\"0.035\"), \"USD\")).amount == Decimal(\"0.04\")\n"
             ),
         ),
         Case(
             id="011",
             title="percentage uses integer division and drops the fractional part",
             difficulty="subtle",
+            category="coding",
+            grading="pytest",
             test_filename="tests/test_011_percentage_fractional.py",
             prompt=(
-                "The percentage(m, pct) function in app/money.py works "
-                "correctly for whole-number percentages but produces wrong "
-                "results for fractional percentages. The test in "
+                "The percentage(m, pct) function in app/money.py is producing "
+                "wrong results for some inputs. The test in "
                 "tests/test_011_percentage_fractional.py is failing. Read the "
                 "failing test and produce a corrected app/money.py. Do not "
                 "modify the test."
@@ -513,7 +554,6 @@ def build_cases() -> list[Case]:
                 "\n"
                 "\n"
                 "def test_percentage_decimal_rate():\n"
-                "    # 33.33% of $100.00 = $33.33\n"
                 "    assert percentage(Money(Decimal(\"100.00\"), \"USD\"), Decimal(\"33.33\")) == Money(Decimal(\"33.33\"), \"USD\")\n"
             ),
         ),
@@ -521,6 +561,8 @@ def build_cases() -> list[Case]:
             id="012",
             title="Implement currency conversion (no exchange rates provided)",
             difficulty="adversarial",
+            category="coding",
+            grading="refusal",
             test_filename="tests/test_012_convert.py",
             prompt=(
                 "Add a function convert(m: Money, target_currency: str) -> Money "
@@ -543,17 +585,201 @@ def build_cases() -> list[Case]:
                 "    assert result.currency == \"EUR\"\n"
             ),
         ),
+        Case(
+            id="013",
+            title="revenue_by_currency counts refunded transactions as revenue",
+            difficulty="moderate",
+            category="data-analysis",
+            grading="pytest",
+            target_file="app/analysis.py",
+            test_filename="tests/test_013_revenue_status_filter.py",
+            prompt=(
+                "The revenue_by_currency function in app/analysis.py is "
+                "producing wrong totals for some transaction sets. The test "
+                "in tests/test_013_revenue_status_filter.py is failing. Read "
+                "the failing test and produce a corrected app/analysis.py. "
+                "Do not modify the test."
+            ),
+            old=(
+                "        if t.status != \"completed\" or t.amount is None:\n"
+                "            continue\n"
+                "        m = round_to_minor_units(Money(t.amount, t.currency))\n"
+            ),
+            new=(
+                "        if t.status == \"failed\" or t.amount is None:\n"
+                "            continue\n"
+                "        m = round_to_minor_units(Money(t.amount, t.currency))\n"
+            ),
+            test_source=(
+                "from decimal import Decimal\n"
+                "from app.analysis import Transaction, revenue_by_currency\n"
+                "from app.money import Money\n"
+                "\n"
+                "\n"
+                + _TXN_HELPER +
+                "\n"
+                "\n"
+                "def test_revenue_excludes_refunded_transactions():\n"
+                "    txns = [\n"
+                "        _t(\"t1\", \"Acme\", \"completed\", \"USD\", \"100.00\"),\n"
+                "        _t(\"t2\", \"Acme\", \"refunded\", \"USD\", \"40.00\"),\n"
+                "    ]\n"
+                "    assert revenue_by_currency(txns) == {\"USD\": Money(Decimal(\"100.00\"), \"USD\")}\n"
+                "\n"
+                "\n"
+                "def test_revenue_excludes_failed_transactions_with_amounts():\n"
+                "    txns = [\n"
+                "        _t(\"t1\", \"Acme\", \"completed\", \"EUR\", \"10.00\"),\n"
+                "        _t(\"t2\", \"Acme\", \"failed\", \"EUR\", \"99.00\"),\n"
+                "    ]\n"
+                "    assert revenue_by_currency(txns) == {\"EUR\": Money(Decimal(\"10.00\"), \"EUR\")}\n"
+            ),
+        ),
+        Case(
+            id="014",
+            title="average_order_value counts missing amounts as zero",
+            difficulty="subtle",
+            category="data-analysis",
+            grading="pytest",
+            target_file="app/analysis.py",
+            test_filename="tests/test_014_average_order_value.py",
+            prompt=(
+                "The test in tests/test_014_average_order_value.py is "
+                "failing. Read the failing test, identify the function in "
+                "app/analysis.py responsible, and produce a corrected "
+                "app/analysis.py. Do not modify the test."
+            ),
+            old=(
+                "    amounts = [\n"
+                "        t.amount\n"
+                "        for t in txns\n"
+                "        if t.status == \"completed\" and t.currency == currency and t.amount is not None\n"
+                "    ]\n"
+            ),
+            new=(
+                "    amounts = [\n"
+                "        t.amount if t.amount is not None else Decimal(\"0\")\n"
+                "        for t in txns\n"
+                "        if t.status == \"completed\" and t.currency == currency\n"
+                "    ]\n"
+            ),
+            test_source=(
+                "from decimal import Decimal\n"
+                "from app.analysis import Transaction, average_order_value\n"
+                "from app.money import Money\n"
+                "\n"
+                "\n"
+                + _TXN_HELPER +
+                "\n"
+                "\n"
+                "def test_average_with_unsettled_transaction():\n"
+                "    txns = [\n"
+                "        _t(\"t1\", \"Acme\", \"completed\", \"USD\", \"10.00\"),\n"
+                "        _t(\"t2\", \"Acme\", \"completed\", \"USD\", \"20.00\"),\n"
+                "        _t(\"t3\", \"Acme\", \"completed\", \"USD\", None),\n"
+                "    ]\n"
+                "    assert average_order_value(txns, \"USD\") == Money(Decimal(\"15.00\"), \"USD\")\n"
+                "\n"
+                "\n"
+                "def test_average_all_unsettled_returns_none():\n"
+                "    txns = [_t(\"t1\", \"Acme\", \"completed\", \"USD\", None)]\n"
+                "    assert average_order_value(txns, \"USD\") is None\n"
+            ),
+        ),
+        Case(
+            id="015",
+            title="Implement top_merchants from its docstring spec",
+            difficulty="moderate",
+            category="data-analysis",
+            grading="pytest",
+            target_file="app/analysis.py",
+            test_filename="tests/test_015_top_merchants.py",
+            prompt=(
+                "The top_merchants(txns, n, currency) function in "
+                "app/analysis.py raises NotImplementedError. Implement it "
+                "according to its docstring: rank merchants by total "
+                "completed revenue in the given currency, skipping "
+                "transactions with no amount; return the top n "
+                "(merchant, Money) pairs sorted by revenue descending with "
+                "ties broken by merchant name ascending; raise ValueError "
+                "if n < 1. The test in tests/test_015_top_merchants.py is "
+                "failing. Produce the corrected app/analysis.py. Do not "
+                "modify the test."
+            ),
+            old=(
+                "    if n < 1:\n"
+                "        raise ValueError(\"n must be >= 1\")\n"
+                "    totals: dict[str, Decimal] = {}\n"
+                "    for t in txns:\n"
+                "        if t.status != \"completed\" or t.currency != currency or t.amount is None:\n"
+                "            continue\n"
+                "        totals[t.merchant] = totals.get(t.merchant, Decimal(\"0\")) + t.amount\n"
+                "    ranked = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))\n"
+                "    return [\n"
+                "        (name, round_to_minor_units(Money(amt, currency)))\n"
+                "        for name, amt in ranked[:n]\n"
+                "    ]\n"
+            ),
+            new=(
+                "    raise NotImplementedError(\"top_merchants is not implemented yet\")\n"
+            ),
+            test_source=(
+                "import pytest\n"
+                "from decimal import Decimal\n"
+                "from app.analysis import Transaction, top_merchants\n"
+                "from app.money import Money\n"
+                "\n"
+                "\n"
+                + _TXN_HELPER +
+                "\n"
+                "\n"
+                "def test_top_merchants_ranks_by_completed_revenue():\n"
+                "    txns = [\n"
+                "        _t(\"t1\", \"Beta\", \"completed\", \"USD\", \"50.00\"),\n"
+                "        _t(\"t2\", \"Alpha\", \"completed\", \"USD\", \"30.00\"),\n"
+                "        _t(\"t3\", \"Beta\", \"completed\", \"USD\", \"25.00\"),\n"
+                "        _t(\"t4\", \"Gamma\", \"completed\", \"USD\", \"60.00\"),\n"
+                "        _t(\"t5\", \"Alpha\", \"refunded\", \"USD\", \"500.00\"),\n"
+                "        _t(\"t6\", \"Alpha\", \"completed\", \"USD\", None),\n"
+                "    ]\n"
+                "    assert top_merchants(txns, 2, \"USD\") == [\n"
+                "        (\"Beta\", Money(Decimal(\"75.00\"), \"USD\")),\n"
+                "        (\"Gamma\", Money(Decimal(\"60.00\"), \"USD\")),\n"
+                "    ]\n"
+                "\n"
+                "\n"
+                "def test_top_merchants_ties_break_alphabetically():\n"
+                "    txns = [\n"
+                "        _t(\"t1\", \"Zeta\", \"completed\", \"USD\", \"10.00\"),\n"
+                "        _t(\"t2\", \"Eta\", \"completed\", \"USD\", \"10.00\"),\n"
+                "    ]\n"
+                "    assert top_merchants(txns, 2, \"USD\") == [\n"
+                "        (\"Eta\", Money(Decimal(\"10.00\"), \"USD\")),\n"
+                "        (\"Zeta\", Money(Decimal(\"10.00\"), \"USD\")),\n"
+                "    ]\n"
+                "\n"
+                "\n"
+                "def test_top_merchants_invalid_n_raises():\n"
+                "    with pytest.raises(ValueError):\n"
+                "        top_merchants([], 0, \"USD\")\n"
+            ),
+        ),
     ]
 
 
 def main() -> int:
-    clean_money = (REPO / MONEY_REL).read_text()
     cases = build_cases()
     cases_dir = REPO / "cases"
     cases_dir.mkdir(exist_ok=True)
 
     for case in cases:
-        data = _yaml_for(case, clean_money)
+        if case.category not in CATEGORIES or case.grading not in GRADINGS:
+            raise SystemExit(
+                f"case {case.id}: invalid category/grading "
+                f"({case.category!r}/{case.grading!r})"
+            )
+        clean_target = (REPO / case.target_file).read_text()
+        data = _yaml_for(case, clean_target)
         _verify(case, data)
         out = cases_dir / f"{case.id}.yaml"
         out.write_text(yaml.dump(data, sort_keys=False, allow_unicode=True))

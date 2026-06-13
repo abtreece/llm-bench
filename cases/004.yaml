@@ -1,6 +1,8 @@
 id: '004'
 title: negate hardcodes the currency to USD
 difficulty: obvious
+category: coding
+grading: pytest
 target_file: app/money.py
 prompt: |-
   The negate function in app/money.py is changing the currency of the returned Money value. The test in tests/test_004_negate_currency.py is failing. Read the failing test and the function, then produce a corrected app/money.py. Do not modify the test.

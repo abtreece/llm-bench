@@ -80,18 +80,30 @@ def apply_blocks(
     worktree: Path,
     blocks: dict[str, str],
     allowed_prefixes: tuple[str, ...] = ("app/",),
+    denied_prefixes: tuple[str, ...] = ("app/data/",),
 ) -> tuple[list[str], list[str]]:
     """Write each block's body to worktree/<path>, overwriting.
 
     Only paths under `allowed_prefixes` are written — this blocks edits to
     tests/ and also conftest.py / pytest.ini style files that could
-    monkeypatch the suite into passing. Returns (written, blocked) paths.
+    monkeypatch the suite into passing. `denied_prefixes` carves fixture
+    data back out of the allowed set: rewriting app/data/ would let a model
+    change the inputs the regression suite asserts against. Returns
+    (written, blocked) paths.
     """
     written: list[str] = []
     blocked: list[str] = []
     for relpath, body in blocks.items():
         norm = relpath[2:] if relpath.startswith("./") else relpath
-        if not any(norm.startswith(p) for p in allowed_prefixes):
+        # extract_blocks already rejects traversal, but the write boundary
+        # must not depend on the caller: "app/../tests/x.py" passes a
+        # string-prefix check while resolving outside the worktree.
+        if (
+            norm.startswith("/")
+            or ".." in norm.split("/")
+            or not any(norm.startswith(p) for p in allowed_prefixes)
+            or any(norm.startswith(p) for p in denied_prefixes)
+        ):
             blocked.append(norm)
             continue
         dest = worktree / norm

@@ -30,6 +30,10 @@ RESULTS_DIR = REPO / "results"
 WORKTREE_ROOT = Path("/tmp/llm-bench")
 PYTEST_BIN = REPO / ".venv" / "bin" / "pytest"
 
+# Bump whenever prompts, grading, or case content change in a way that makes
+# results incomparable with earlier runs. v1 = implicit pre-versioning runs.
+BENCH_VERSION = 2
+
 SYSTEM_PROMPT = """\
 You are a coding assistant fixing a Python source file.
 
@@ -43,6 +47,10 @@ Output format (MANDATORY):
 - Each block MUST contain the COMPLETE replacement contents of that file.
   Do not emit diffs or partial snippets.
 - Do not modify any test file.
+
+Exception: if the task cannot be implemented correctly with the information
+provided, emit no code blocks at all — reply in plain prose explaining what
+is missing.
 
 Example:
 ```python
@@ -72,6 +80,7 @@ Produce the corrected {target_path} using the required edit format. Do not modif
 
 CSV_FIELDS = [
     "run_id",
+    "bench_version",
     "model",
     "case_id",
     "attempt",
@@ -91,11 +100,17 @@ CSV_FIELDS = [
 ]
 
 
+CATEGORIES = frozenset({"coding", "data-analysis"})
+GRADINGS = frozenset({"pytest", "refusal"})
+
+
 @dataclass
 class Case:
     id: str
     title: str
-    difficulty: str
+    difficulty: str  # obvious | moderate | subtle | adversarial
+    category: str  # one of CATEGORIES
+    grading: str  # one of GRADINGS
     target_file: str
     prompt: str
     breaking_patch: str
@@ -119,11 +134,21 @@ def load_cases(only: list[str] | None) -> list[Case]:
     cases: list[Case] = []
     for p in sorted(CASES_DIR.glob("*.yaml")):
         d = yaml.safe_load(p.read_text())
+        # An unknown grading would silently fall into the wrong scoring
+        # path; an absent one means a stale YAML that predates the field.
+        if d.get("category") not in CATEGORIES or d.get("grading") not in GRADINGS:
+            raise SystemExit(
+                f"{p.name}: invalid category/grading "
+                f"({d.get('category')!r}/{d.get('grading')!r}) — "
+                f"regenerate with cases/_build.py"
+            )
         cases.append(
             Case(
                 id=d["id"],
                 title=d["title"],
                 difficulty=d["difficulty"],
+                category=d["category"],
+                grading=d["grading"],
                 target_file=d["target_file"],
                 prompt=d["prompt"],
                 breaking_patch=d["breaking_patch"],
@@ -221,6 +246,8 @@ def classify_status(row: dict) -> str:
         return "INFRA"
     if err.startswith("truncated"):
         return "TRUNC"
+    if err.startswith("refused"):
+        return "REFUSED"
     if err.startswith("parse_error"):
         return "PARSE_ERR"
     if row["target_passed"] and row["regressions"] == 0:
@@ -263,6 +290,7 @@ def run_one(
     row = {f: "" for f in CSV_FIELDS}
     row.update(
         run_id=run_id,
+        bench_version=BENCH_VERSION,
         model=model,
         case_id=case.id,
         attempt=attempt,
@@ -287,7 +315,7 @@ def run_one(
         git_apply(case.test_patch, work)
 
         test_path = parse_test_path_from_patch(case.test_patch)
-        if case.difficulty != "adversarial" and not baseline_failures:
+        if case.grading == "pytest" and not baseline_failures:
             row["error"] = "baseline_clean"
             return row
 
@@ -338,9 +366,14 @@ def run_one(
         attempt_artifacts.mkdir(parents=True, exist_ok=True)
         (attempt_artifacts / "response.txt").write_text(result.content)
 
-        # Adversarial cases grade pushback, not patches: pass means the model
-        # refused (no file blocks + a refusal phrase). pytest never runs.
-        if case.difficulty == "adversarial":
+        # Refusal-graded cases grade pushback, not patches: pass means the
+        # model refused (no file blocks + a refusal phrase). pytest never runs.
+        if case.grading == "refusal":
+            if result.done_reason == "length":
+                # A truncated response can't be graded for pushback: the cut
+                # could have removed either the refusal phrase or the code.
+                row["error"] = "truncated:refusal response hit token limit"
+                return row
             row["schema_ok"] = True
             row["target_passed"] = scorer.grade_refusal(result.content)
             return row
@@ -352,6 +385,11 @@ def run_one(
                 # Generation hit the token limit mid-file — a config/capacity
                 # issue, not evidence the model can't follow the format.
                 row["error"] = f"truncated:{e}"
+            elif "```" not in result.content:
+                # No code at all: the model took the prose escape hatch on a
+                # pytest-graded case. Still a fail, but a judgment failure,
+                # not a format failure — keep it out of the parse_error count.
+                row["error"] = "refused:prose reply with no code blocks"
             else:
                 row["error"] = f"parse_error:{e}"
             return row
@@ -420,7 +458,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print("# computing per-case baselines...")
     baselines = {
-        case.id: set() if case.difficulty == "adversarial"
+        case.id: set() if case.grading == "refusal"
         else compute_baseline(case, run_id, args.test_timeout)
         for case in cases
     }
@@ -437,7 +475,8 @@ def main(argv: list[str] | None = None) -> int:
                 # was skipped instead of silently omitting it.
                 skip_row = {f: "" for f in CSV_FIELDS}
                 skip_row.update(
-                    run_id=run_id, model=model, case_id="*", attempt=0,
+                    run_id=run_id, bench_version=BENCH_VERSION, model=model,
+                    case_id="*", attempt=0,
                     error=f"infra_error:warmup_failed:{type(e).__name__}:{e}",
                 )
                 w.writerow(skip_row)
